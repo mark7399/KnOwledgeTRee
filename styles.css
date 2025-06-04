@@ -1,0 +1,859 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: #f5f7fa;
+    color: #333;
+    overflow: hidden;
+}
+
+#app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 工具栏样式 */
+.toolbar {
+    background: #fff;
+    padding: 12px 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+}
+
+.toolbar-section {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+/* 按钮样式 */
+.btn {
+    padding: 8px 16px;
+    border: 1px solid #e1e4e8;
+    background: #fff;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn:hover {
+    background: #f6f8fa;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+    background: #2188ff;
+    color: white;
+    border-color: #2188ff;
+}
+
+.btn-primary:hover {
+    background: #0366d6;
+    border-color: #0366d6;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+    border-color: #28a745;
+}
+
+.btn-success:hover {
+    background: #218838;
+    border-color: #1e7e34;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+    border-color: #bd2130;
+}
+
+.btn-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #666;
+    padding: 4px 8px;
+}
+
+.btn-close:hover {
+    color: #333;
+}
+
+/* 图标样式 */
+.icon {
+    font-size: 16px;
+}
+
+/* 主内容区 */
+.main-content {
+    display: flex;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+/* 知识树容器 */
+.tree-container {
+    flex-grow: 1;
+    height: 100%;
+    border-right: 1px solid #e1e4e8;
+    position: relative;
+}
+
+/* 侧边栏 */
+.sidebar {
+    width: 0;
+    height: 100%;
+    background: #fff;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s ease;
+    overflow: hidden;
+}
+
+.sidebar.open {
+    width: 650px;
+}
+
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid #e1e4e8;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.document-content {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+.document-content h1, .document-content h2, .document-content h3 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+}
+
+.document-content h1 {
+    font-size: 24px;
+    border-bottom: 1px solid #e1e4e8;
+    padding-bottom: 8px;
+}
+
+.document-content h2 {
+    font-size: 20px;
+}
+
+.document-content h3 {
+    font-size: 18px;
+}
+
+.document-content p {
+    margin-bottom: 16px;
+    text-align: justify;
+}
+
+.document-content ul, .document-content ol {
+    margin-bottom: 16px;
+    padding-left: 30px;
+}
+
+.document-content li {
+    margin-bottom: 8px;
+}
+
+.document-content code {
+    background: #f6f8fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+}
+
+.document-content pre {
+    background: #f6f8fa;
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin-bottom: 16px;
+    border: 1px solid #e1e4e8;
+}
+
+.document-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.document-content blockquote {
+    border-left: 4px solid #2188ff;
+    padding-left: 16px;
+    margin: 16px 0;
+    color: #586069;
+    font-style: italic;
+}
+
+.document-content strong {
+    font-weight: 600;
+    color: #24292e;
+}
+
+.document-content em {
+    font-style: italic;
+}
+
+/* 文档视图优化 */
+.document-view {
+    padding: 0;
+    line-height: 1.8;
+    color: #24292e;
+}
+
+.document-view p:first-child {
+    margin-top: 0;
+}
+
+.document-view p:last-child {
+    margin-bottom: 0;
+}
+
+.placeholder {
+    color: #999;
+    text-align: center;
+    margin-top: 40px;
+}
+
+/* 对话框样式 */
+.dialog {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.dialog.show {
+    display: flex;
+}
+
+.dialog-content {
+    background: #fff;
+    padding: 32px;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    min-width: 400px;
+    animation: dialogSlideIn 0.3s ease;
+}
+
+@keyframes dialogSlideIn {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.dialog-content h2 {
+    margin-bottom: 24px;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.dialog-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+    justify-content: flex-end;
+}
+
+/* 输入框样式 */
+.input-field {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    font-size: 15px;
+    transition: border-color 0.2s ease;
+}
+
+.input-field:focus {
+    outline: none;
+    border-color: #2188ff;
+    box-shadow: 0 0 0 3px rgba(33, 136, 255, 0.1);
+}
+
+/* 表单组 */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+/* 模型选择器 */
+.model-select {
+    padding: 8px 12px;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fff;
+    cursor: pointer;
+}
+
+/* 加载动画 - 暂时禁用 */
+.loading-overlay {
+    display: none !important; /* 强制隐藏加载动画 */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+
+.loading-overlay.show {
+    display: none !important; /* 即使添加了show类也保持隐藏 */
+}
+
+.loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #2188ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 右键菜单 */
+.context-menu {
+    display: none;
+    position: fixed;
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1500;
+    min-width: 180px;
+}
+
+.context-menu.show {
+    display: block;
+}
+
+.menu-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    transition: background 0.2s ease;
+}
+
+.menu-item:hover {
+    background: #f6f8fa;
+}
+
+/* 设置区域 */
+.settings-section {
+    margin-bottom: 24px;
+}
+
+.settings-section h3 {
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* 文本选择样式 */
+::selection {
+    background: #2188ff;
+    color: white;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+/* 扩展的对话框内容 */
+.dialog-content-wide {
+    width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+/* 标签页样式 */
+.settings-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e1e4e8;
+}
+
+.tab-btn {
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: #586069;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    color: #24292e;
+}
+
+.tab-btn.active {
+    color: #0366d6;
+    border-bottom-color: #0366d6;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* 模型列表样式 */
+.models-list, .prompts-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.model-item, .prompt-item {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.model-item input, .prompt-item input, .prompt-item textarea {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.prompt-item textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+.item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.item-title {
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.btn-remove {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.btn-remove:hover {
+    background: #c82333;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+/* 模板列表样式 */
+.template-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.template-item {
+    padding: 12px;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.template-item:hover {
+    background: #f6f8fa;
+    border-color: #0366d6;
+}
+
+.template-name {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.template-preview {
+    font-size: 12px;
+    color: #586069;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 选择器样式更新 */
+.model-select {
+    min-width: 150px;
+}
+
+/* 数学公式样式 */
+.document-content .MathJax {
+    font-size: 1.1em;
+    margin: 0.5em 0;
+}
+
+.document-content .MathJax_Display {
+    margin: 1em 0;
+}
+
+/* 确保公式在加载时不会闪烁 */
+.document-content mjx-container {
+    display: inline-block;
+    margin: 0.2em 0;
+}
+
+/* 公式容器的响应式设计 */
+.document-content mjx-container[display="block"] {
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+/* 文档编辑样式 */
+.document-editor {
+    width: 100%;
+    min-height: 400px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.document-edit-controls {
+    padding: 10px 15px;
+    border-top: 1px solid #eee;
+    text-align: right;
+}
+
+.document-edit-controls button {
+    margin-left: 10px;
+}
+
+/* 保存的知识树列表样式 */
+.saved-trees-list {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 8px;
+    margin: 16px 0;
+}
+
+.saved-tree-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.saved-tree-item:hover {
+    background-color: #f5f5f5;
+}
+
+.btn-load-item {
+    flex-grow: 1;
+    text-align: left;
+    margin-right: 10px;
+}
+
+.btn-delete-item {
+    flex-shrink: 0;
+}
+
+/* 删除按钮样式 */
+.btn-danger {
+    background-color: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+}
+
+/* 辅助按钮样式 */
+.btn-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+}
+
+/* Markdown内容样式优化 */
+.document-view h1,
+.document-view h2,
+.document-view h3,
+.document-view h4,
+.document-view h5,
+.document-view h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.document-view h1 {
+    font-size: 28px;
+    border-bottom: 1px solid #e1e4e8;
+    padding-bottom: 10px;
+}
+
+.document-view h2 {
+    font-size: 24px;
+}
+
+.document-view h3 {
+    font-size: 20px;
+}
+
+.document-view h4 {
+    font-size: 18px;
+}
+
+.document-view p {
+    margin-bottom: 16px;
+    line-height: 1.8;
+}
+
+.document-view ul,
+.document-view ol {
+    margin-bottom: 16px;
+    padding-left: 30px;
+}
+
+.document-view li {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.document-view blockquote {
+    border-left: 4px solid #dfe2e5;
+    padding: 0 16px;
+    color: #6a737d;
+    margin: 16px 0;
+}
+
+.document-view code {
+    background-color: rgba(27, 31, 35, 0.05);
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.document-view pre {
+    background-color: #f6f8fa;
+    padding: 16px;
+    overflow: auto;
+    font-size: 85%;
+    line-height: 1.45;
+    border-radius: 6px;
+    margin-bottom: 16px;
+}
+
+.document-view pre code {
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+    font-size: 100%;
+    word-break: normal;
+    white-space: pre;
+    border: 0;
+}
+
+.document-view table {
+    border-spacing: 0;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    width: 100%;
+}
+
+.document-view table th,
+.document-view table td {
+    padding: 6px 13px;
+    border: 1px solid #dfe2e5;
+}
+
+.document-view table th {
+    font-weight: 600;
+    background-color: #f6f8fa;
+}
+
+.document-view table tr {
+    background-color: #fff;
+}
+
+.document-view table tr:nth-child(2n) {
+    background-color: #f6f8fa;
+}
+
+.document-view hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #e1e4e8;
+    border: 0;
+}
+
+.document-view img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 16px 0;
+}
+
+.document-view a {
+    color: #0366d6;
+    text-decoration: none;
+}
+
+.document-view a:hover {
+    text-decoration: underline;
+}
+
+/* 数学公式样式优化 */
+.document-view mjx-container {
+    margin: 0.5em 0;
+}
+
+.document-view mjx-container[display="block"] {
+    margin: 1em 0;
+}
+
+/* 思维过程内容样式 */
+.thinking-process h1,
+.thinking-process h2,
+.thinking-process h3 {
+    font-size: 16px !important;
+    margin-top: 16px !important;
+    margin-bottom: 8px !important;
+}
+
+.thinking-process p {
+    margin-bottom: 8px;
+}
+
+.thinking-process ul,
+.thinking-process ol {
+    margin-bottom: 8px;
+    padding-left: 20px;
+}
+
+/* 文档编辑器样式优化 */
+.document-editor {
+    width: 100%;
+    min-height: 400px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+    background-color: #f8f9fa;
+}

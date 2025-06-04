@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识树 - 递归概念学习工具</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://unpkg.com/vis-network@9.1.6/dist/dist/vis-network.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- 头部工具栏 -->
+        <header class="toolbar">
+            <div class="toolbar-section">
+                <button class="btn btn-primary" onclick="showNewNodeDialog()">
+                    <span class="icon">+</span> 新建节点
+                </button>
+                <button class="btn" onclick="saveTree()">
+                    <span class="icon">💾</span> 保存
+                </button>
+                <button class="btn" onclick="loadTree()">
+                    <span class="icon">📁</span> 加载
+                </button>
+            </div>
+            <div class="toolbar-section">
+                <button class="btn" onclick="showSettings()">
+                    <span class="icon">⚙️</span> 设置
+                </button>
+                <select id="modelSelect" class="model-select">
+                    <option value="deepseek">DeepSeek R1</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- 主要内容区 -->
+        <div class="main-content">
+            <!-- 知识树视图 -->
+            <div id="knowledge-tree" class="tree-container"></div>
+            
+            <!-- 侧边栏 - 文档查看器 -->
+            <div id="sidebar" class="sidebar">
+                <div class="sidebar-header">
+                    <h3 id="documentTitle">选择一个节点查看文档</h3>
+                    <button class="btn-close" onclick="closeSidebar()">×</button>
+                </div>
+                <div id="documentContent" class="document-content">
+                    <p class="placeholder">点击知识树中的节点查看相关文档</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新建节点对话框 -->
+        <div id="newNodeDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>创建新节点</h2>
+                <input type="text" id="newNodeInput" placeholder="输入概念名称，如：线性回归" class="input-field">
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="createNewNode()">创建</button>
+                    <button class="btn" onclick="closeDialog('newNodeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑节点对话框 -->
+        <div id="editNodeDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>编辑节点</h2>
+                <input type="text" id="editNodeInput" placeholder="输入新的概念名称" class="input-field">
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="updateNode()">更新</button>
+                    <button class="btn btn-danger" onclick="deleteNode()">删除</button>
+                    <button class="btn" onclick="closeDialog('editNodeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- API设置对话框 -->
+        <div id="settingsDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>API设置</h2>
+                <div class="settings-section">
+                    <h3>DeepSeek配置</h3>
+                    <div class="form-group">
+                        <label>API Key:</label>
+                        <input type="password" id="deepseekKey" placeholder="输入DeepSeek API Key" class="input-field">
+                    </div>
+                    <div class="form-group">
+                        <label>模型:</label>
+                        <input type="text" id="deepseekModel" value="deepseek-chat" class="input-field">
+                    </div>
+                </div>
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+                    <button class="btn" onclick="closeDialog('settingsDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载提示 -->
+        <div id="loadingOverlay" class="loading-overlay">
+            <div class="loading-spinner"></div>
+            <p>正在处理中，请稍候...</p>
+        </div>
+
+        <!-- 加载知识树对话框 -->
+        <div id="loadTreeDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>选择要加载的知识树</h2>
+                <div id="savedTreesList" class="saved-trees-list"></div>
+                <div class="dialog-buttons">
+                    <button class="btn" onclick="closeDialog('loadTreeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右键菜单 -->
+        <div id="contextMenu" class="context-menu">
+            <div class="menu-item" onclick="createNodeFromSelection()">
+                <span class="icon">+</span> 创建为新节点
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/vis-network@9.1.6/dist/dist/vis-network.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

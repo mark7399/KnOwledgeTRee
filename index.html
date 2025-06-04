@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识树 - 递归概念学习工具</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/dist/dist/vis-network.min.css" rel="stylesheet">
+    <!-- 添加 Markdown 解析库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/lib/marked.umd.js"></script>
+    <!-- 添加 MathJax 支持数学公式渲染 -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['\\(', '\\)']],
+                displayMath: [['\\[', '\\]']],
+                processEscapes: true,
+                processEnvironments: true
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div id="app">
+        <!-- 头部工具栏 -->
+        <header class="toolbar">
+            <div class="toolbar-section">
+                <button class="btn btn-success" onclick="newTree()">
+                    <span class="icon">🌳</span> 新建知识树
+                </button>
+                <button class="btn btn-primary" onclick="showNewNodeDialog()">
+                    <span class="icon">+</span> 新建节点
+                </button>
+                <button class="btn" onclick="saveTree()">
+                    <span class="icon">💾</span> 保存
+                </button>
+                <button class="btn" onclick="loadTree()">
+                    <span class="icon">📁</span> 加载
+                </button>
+            </div>
+            <div class="toolbar-section">
+                <button class="btn" onclick="showSettings()">
+                    <span class="icon">⚙️</span> 设置
+                </button>
+                <select id="modelSelect" class="model-select">
+                    <option value="deepseek">DeepSeek R1</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- 主要内容区 -->
+        <div class="main-content">
+            <!-- 知识树视图 -->
+            <div id="knowledge-tree" class="tree-container"></div>
+            
+            <!-- 侧边栏 - 文档查看器 -->
+            <div id="sidebar" class="sidebar">
+                <div class="sidebar-header">
+                    <h3 id="documentTitle">选择一个节点查看文档</h3>
+                    <button class="btn-close" onclick="closeSidebar()">×</button>
+                </div>
+                <div id="documentContent" class="document-content">
+                    <p class="placeholder">点击知识树中的节点查看相关文档</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新建节点对话框 -->
+        <div id="newNodeDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>创建新节点</h2>
+                <input type="text" id="newNodeInput" placeholder="输入概念名称，如：线性回归" class="input-field">
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="createNewNode()">创建</button>
+                    <button class="btn" onclick="closeDialog('newNodeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑节点对话框 -->
+        <div id="editNodeDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>编辑节点</h2>
+                <input type="text" id="editNodeInput" placeholder="输入新的概念名称" class="input-field">
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="updateNode()">更新</button>
+                    <button class="btn btn-danger" onclick="deleteNode()">删除</button>
+                    <button class="btn" onclick="closeDialog('editNodeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- API设置对话框 -->
+        <div id="settingsDialog" class="dialog">
+            <div class="dialog-content dialog-content-wide">
+                <h2>设置</h2>
+                <div class="settings-tabs">
+                    <button class="tab-btn active" onclick="switchTab('models')">模型配置</button>
+                    <button class="tab-btn" onclick="switchTab('prompts')">提示词模板</button>
+                </div>
+                
+                <!-- 模型配置 -->
+                <div id="modelsTab" class="tab-content active">
+                    <div class="models-list" id="modelsList">
+                        <!-- 动态生成的模型配置 -->
+                    </div>
+                    <button class="btn btn-secondary" onclick="addModel()">+ 添加新模型</button>
+                </div>
+                
+                <!-- 提示词模板 -->
+                <div id="promptsTab" class="tab-content">
+                    <div class="prompts-list" id="promptsList">
+                        <!-- 动态生成的提示词模板 -->
+                    </div>
+                    <button class="btn btn-secondary" onclick="addPromptTemplate()">+ 添加新模板</button>
+                </div>
+                
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+                    <button class="btn" onclick="closeDialog('settingsDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 提示词选择对话框 -->
+        <div id="promptSelectDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>选择提示词模板</h2>
+                <div id="promptTemplateList" class="template-list">
+                    <!-- 动态生成的模板列表 -->
+                </div>
+                <div class="dialog-buttons">
+                    <button class="btn" onclick="closeDialog('promptSelectDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件名输入对话框 -->
+        <div id="filenameDialog" class="dialog">
+            <div class="dialog-content">
+                <h2>保存知识树</h2>
+                <input type="text" id="filenameInput" placeholder="输入文件名" class="input-field">
+                <div class="dialog-buttons">
+                    <button class="btn btn-primary" onclick="confirmSaveTree()">保存</button>
+                    <button class="btn" onclick="closeDialog('filenameDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件加载选择对话框 -->
+        <div id="loadTreeDialog" class="dialog">
+            <div class="dialog-content dialog-content-wide">
+                <h2>加载知识树</h2>
+                <p>请选择要加载的文件：</p>
+                <div id="savedTreesList" class="saved-trees-list">
+                    <!-- 动态生成的文件列表将在这里 (文件名和删除按钮) -->
+                </div>
+                <div class="dialog-buttons">
+                    <button class="btn" onclick="closeDialog('loadTreeDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载提示 -->
+        <div id="loadingOverlay" class="loading-overlay">
+            <div class="loading-spinner"></div>
+            <p>正在处理中，请稍候...</p>
+        </div>
+
+        <!-- 右键菜单 -->
+        <div id="contextMenu" class="context-menu">
+            <div class="menu-item" onclick="createNodeFromSelection()">
+                <span class="icon">+</span> 创建为新节点
+            </div>
+        </div>
+
+        <!-- 节点右键菜单 -->
+        <div id="nodeContextMenu" class="context-menu">
+            <div class="menu-item" onclick="showEditNodeDialog()">
+                <span class="icon">✏️</span> 修改关键词
+            </div>
+            <div class="menu-item" onclick="deleteNode()">
+                <span class="icon">🗑️</span> 删除节点
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/dist/vis-network.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

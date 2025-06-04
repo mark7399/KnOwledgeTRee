@@ -1,0 +1,41 @@
+{
+  "name": "knowledge-tree-app",
+  "version": "1.0.0",
+  "description": "知识树 - 递归生成的概念学习工具",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node start-web.js",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "knowledge",
+    "tree",
+    "learning",
+    "AI"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^36.3.2",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "openai": "^5.0.1"
+  },
+  "build": {
+    "appId": "com.knowledge.tree",
+    "productName": "知识树",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
