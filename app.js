@@ -433,6 +433,35 @@ function parseMarkdown(content) {
     }
 }
 
+// 获取节点链路径（从当前节点到根节点）
+function getNodeChain(nodeId) {
+    const chain = [];
+    let currentNodeId = nodeId;
+    
+    // 向上追溯到根节点
+    while (currentNodeId !== null) {
+        const currentNode = nodes.get(currentNodeId);
+        if (!currentNode) break;
+        
+        // 只添加有文档内容的节点到链中
+        if (currentNode.document) {
+            chain.unshift({
+                concept: currentNode.label,
+                document: currentNode.document
+            });
+        }
+        
+        // 查找父节点
+        const parentEdge = edges.get({
+            filter: edge => edge.to === currentNodeId
+        })[0];
+        
+        currentNodeId = parentEdge ? parentEdge.from : null;
+    }
+    
+    return chain;
+}
+
 // 显示文档
 async function showDocument(nodeId) {
     const node = nodes.get(nodeId);
@@ -451,17 +480,23 @@ async function showDocument(nodeId) {
     
     // 生成文档
     // 清空现有文档显示，准备接收流式内容
-    displayDocument(node.label, '正在生成文档，请稍候...', false); 
+    document.getElementById('documentTitle').textContent = node.label + ' - 正在生成...';
+    const contentDiv = document.getElementById('documentContent');
+    contentDiv.innerHTML = ''; // 清空所有内容，为新的思维链和文档做准备 
 
     try {
         const modelId = document.getElementById('modelSelect').value;
+        // 获取节点链历史信息
+        const nodeChain = getNodeChain(nodeId);
+        
         const response = await fetch(`http://localhost:${serverPort}/api/generate-document`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 concept: node.label,
                 modelId: modelId,
-                promptId: selectedPromptId
+                promptId: selectedPromptId,
+                nodeChain: nodeChain
             })
         });
 
@@ -478,9 +513,10 @@ async function showDocument(nodeId) {
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
         
         // 显示思维过程
-        let thinkingContent = '';
+        let reasoningContent = '';
         let finalContent = '';
-        let isThinking = true;
+        let hasStartedReasoning = false;
+        let hasStartedContent = false;
         
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -498,65 +534,66 @@ async function showDocument(nodeId) {
                         // console.log('Received [DONE] signal.');
                         nodes.update({ id: nodeId, document: finalContent, label: node.label, modelId: modelId });
                         hasUnsavedChanges = true; // 标记有未保存的修改
-                        displayDocument(node.label, finalContent); // 显示最终完整内容
+                        
+                        // 显示最终完整内容
+                        if (hasStartedReasoning && reasoningContent) {
+                            displayThinkingProcess(node.label, reasoningContent, true);
+                            displayDocumentWithThinking(node.label, reasoningContent, finalContent);
+                        } else {
+                            displayDocument(node.label, finalContent);
+                        }
+                        
                         generatingNodes.delete(nodeId); // 移除生成状态
                         autoSaveTree(); 
                         return; 
                     }
                     try {
                         const parsed = JSON.parse(jsonData);
-                        if (parsed.content) {
-                            const content = parsed.content;
+                        
+                        // 处理思维过程内容
+                        if (parsed.reasoning_content) {
+                            reasoningContent += parsed.reasoning_content;
                             
-                            // 检测思维过程标记
-                            if (content.includes('<think>') || thinkingContent.includes('<think>')) {
-                                isThinking = true;
-                                thinkingContent += content;
-                                
-                                // 如果包含结束标记，切换到正式内容
-                                if (thinkingContent.includes('</think>')) {
-                                    isThinking = false;
-                                    // 提取思维过程内容
-                                    const thinkMatch = thinkingContent.match(/<think>([\s\S]*?)<\/think>/);
-                                    if (thinkMatch) {
-                                        const thinkingText = thinkMatch[1].trim();
-                                        // 显示思维过程
-                                        displayThinkingProcess(node.label, thinkingText);
-                                    }
-                                    // 移除思维标记，继续处理后续内容
-                                    const afterThink = thinkingContent.split('</think>')[1] || '';
-                                    finalContent += afterThink;
-                                } else {
-                                    // 仍在思维过程中，显示思维内容
-                                    const currentThinking = thinkingContent.replace(/<think>/g, '').replace(/<\/think>/g, '');
-                                    displayThinkingProcess(node.label, currentThinking + '...');
-                                }
-                            } else if (!isThinking) {
-                                // 正式内容
-                                finalContent += content;
-                                // 实时显示解析后的内容
-                                displayDocument(node.label, finalContent + '\n\n...正在生成...'); 
-                                
-                                // 确保数学公式在流式输出时也能正确渲染
-                                setTimeout(() => {
-                                    if (typeof MathJax !== 'undefined') {
-                                        const documentContentDiv = document.getElementById('documentContent');
-                                        MathJax.typesetPromise([documentContentDiv]).catch((e) => console.error('MathJax streaming render error:', e));
-                                    }
-                                }, 100);
+                            if (!hasStartedReasoning) {
+                                hasStartedReasoning = true;
+                                // 首次显示思维过程
+                                displayThinkingProcess(node.label, reasoningContent, false);
                             } else {
-                                // 没有思维标记的情况，直接作为最终内容
-                                finalContent += content;
-                                displayDocument(node.label, finalContent + '\n\n...正在生成...'); 
-                                
-                                // 确保数学公式在流式输出时也能正确渲染
-                                setTimeout(() => {
-                                    if (typeof MathJax !== 'undefined') {
-                                        const documentContentDiv = document.getElementById('documentContent');
-                                        MathJax.typesetPromise([documentContentDiv]).catch((e) => console.error('MathJax streaming render error:', e));
-                                    }
-                                }, 100);
+                                // 更新思维过程
+                                displayThinkingProcess(node.label, reasoningContent, false);
                             }
+                        }
+                        
+                        // 处理最终内容
+                        if (parsed.content) {
+                            finalContent += parsed.content;
+                            
+                            if (!hasStartedContent) {
+                                hasStartedContent = true;
+                                // 思维过程完成，开始显示最终内容
+                                if (hasStartedReasoning && reasoningContent) {
+                                    displayThinkingProcess(node.label, reasoningContent, true);
+                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent + '\n\n...正在生成...');
+                                } else {
+                                    // 没有思维过程，直接显示文档
+                                    displayDocument(node.label, finalContent + '\n\n...正在生成...');
+                                }
+                            } else {
+                                // 更新最终内容
+                                if (hasStartedReasoning && reasoningContent) {
+                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent + '\n\n...正在生成...');
+                                } else {
+                                    displayDocument(node.label, finalContent + '\n\n...正在生成...');
+                                }
+                            }
+                            
+                            // 确保数学公式在流式输出时也能正确渲染
+                            setTimeout(() => {
+                                if (typeof MathJax !== 'undefined') {
+                                    const documentContentDiv = document.getElementById('documentContent');
+                                    MathJax.typesetPromise([documentContentDiv]).catch((e) => console.error('MathJax streaming render error:', e));
+                                }
+                            }, 100);
                         } else if (parsed.error) {
                             console.error('Error from stream:', parsed.details || parsed.error);
                             throw new Error(parsed.details || parsed.error);
@@ -570,7 +607,15 @@ async function showDocument(nodeId) {
         // 如果循环正常结束但没有收到 [DONE]，也进行最终处理
         nodes.update({ id: nodeId, document: finalContent, label: node.label, modelId: modelId });
         hasUnsavedChanges = true; // 标记有未保存的修改
-        displayDocument(node.label, finalContent);
+        
+        // 显示最终完整内容
+        if (hasStartedReasoning && reasoningContent) {
+            displayThinkingProcess(node.label, reasoningContent, true);
+            displayDocumentWithThinking(node.label, reasoningContent, finalContent);
+        } else {
+            displayDocument(node.label, finalContent);
+        }
+        
         generatingNodes.delete(nodeId); // 移除生成状态
         autoSaveTree();
 
@@ -599,16 +644,33 @@ function displayDocument(title, content, isMarkdown = true) {
     // 获取或创建 documentView 元素
     let documentView = document.getElementById('documentView');
     if (!documentView) {
-        // 如果是第一次显示，则构建完整的结构
-        contentDiv.innerHTML = `
-            <div class="document-view" id="documentView"></div>
-            <div class="document-edit-controls">
-                <button class="btn btn-secondary" onclick="toggleEditMode()">编辑文档</button>
-                <button class="btn btn-primary" id="saveDocumentBtn" style="display:none;" onclick="saveDocumentChanges()">保存更改</button>
-                <button class="btn" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">取消</button>
-            </div>
-            <textarea class="document-editor" id="documentEditor" style="display:none;" data-original-content="${content.replace(/"/g, '&quot;')}"></textarea>
-        `;
+        // 检查是否已有思维过程容器
+        const thinkingContainer = document.getElementById('thinking-container');
+        
+        if (thinkingContainer) {
+            // 如果已有思维过程容器，在其后添加文档内容
+            const documentStructure = `
+                <div class="document-view" id="documentView"></div>
+                <div class="document-edit-controls">
+                    <button class="btn btn-secondary" onclick="toggleEditMode()">编辑文档</button>
+                    <button class="btn btn-primary" id="saveDocumentBtn" style="display:none;" onclick="saveDocumentChanges()">保存更改</button>
+                    <button class="btn" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">取消</button>
+                </div>
+                <textarea class="document-editor" id="documentEditor" style="display:none;" data-original-content="${content.replace(/"/g, '&quot;')}"></textarea>
+            `;
+            thinkingContainer.insertAdjacentHTML('afterend', documentStructure);
+        } else {
+            // 如果没有思维过程容器，则构建完整的结构
+            contentDiv.innerHTML = `
+                <div class="document-view" id="documentView"></div>
+                <div class="document-edit-controls">
+                    <button class="btn btn-secondary" onclick="toggleEditMode()">编辑文档</button>
+                    <button class="btn btn-primary" id="saveDocumentBtn" style="display:none;" onclick="saveDocumentChanges()">保存更改</button>
+                    <button class="btn" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">取消</button>
+                </div>
+                <textarea class="document-editor" id="documentEditor" style="display:none;" data-original-content="${content.replace(/"/g, '&quot;')}"></textarea>
+            `;
+        }
         documentView = document.getElementById('documentView');
     }
 
@@ -1215,99 +1277,187 @@ function hideLoading() {
 }
 
 // 显示思维过程
-function displayThinkingProcess(title, thinkingText) {
-    document.getElementById('documentTitle').textContent = title + ' - 思考中...';
+function displayThinkingProcess(title, thinkingText, isComplete = false) {
     const contentDiv = document.getElementById('documentContent');
+    
+    // 查找现有的思维过程容器
+    let thinkingContainer = document.getElementById('thinking-container');
+    
+    if (!thinkingContainer) {
+        // 创建思维过程容器
+        thinkingContainer = document.createElement('div');
+        thinkingContainer.id = 'thinking-container';
+        thinkingContainer.className = 'thinking-container';
+        
+        // 创建折叠/展开头部
+        const thinkingHeader = document.createElement('div');
+        thinkingHeader.className = 'thinking-header';
+        thinkingHeader.style.cssText = `
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            padding: 12px 15px;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            font-size: 14px;
+            user-select: none;
+            transition: background 0.3s ease;
+        `;
+        
+        const headerText = document.createElement('span');
+        headerText.innerHTML = '🤔 AI思维过程';
+        
+        const toggleIcon = document.createElement('span');
+        toggleIcon.className = 'toggle-icon';
+        toggleIcon.innerHTML = '▼';
+        toggleIcon.style.cssText = `
+            transition: transform 0.3s ease;
+            font-size: 12px;
+        `;
+        
+        thinkingHeader.appendChild(headerText);
+        thinkingHeader.appendChild(toggleIcon);
+        
+        // 创建思维内容区域
+        const thinkingContent = document.createElement('div');
+        thinkingContent.className = 'thinking-content';
+        thinkingContent.style.cssText = `
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-left: 4px solid #4CAF50;
+            border-right: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 0 0 8px 8px;
+            font-style: italic;
+            color: #555;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.6;
+            font-size: 13px;
+            transition: max-height 0.3s ease;
+        `;
+        
+        // 添加折叠/展开功能
+        let isCollapsed = false;
+        thinkingHeader.addEventListener('click', () => {
+            isCollapsed = !isCollapsed;
+            if (isCollapsed) {
+                thinkingContent.style.maxHeight = '0';
+                thinkingContent.style.padding = '0 15px';
+                thinkingContent.style.borderBottom = 'none';
+                toggleIcon.style.transform = 'rotate(-90deg)';
+                thinkingHeader.style.borderRadius = '8px';
+            } else {
+                thinkingContent.style.maxHeight = '300px';
+                thinkingContent.style.padding = '15px';
+                thinkingContent.style.borderBottom = '1px solid #ddd';
+                toggleIcon.style.transform = 'rotate(0deg)';
+                thinkingHeader.style.borderRadius = '8px 8px 0 0';
+            }
+        });
+        
+        thinkingContainer.appendChild(thinkingHeader);
+        thinkingContainer.appendChild(thinkingContent);
+        
+        // 将思维过程容器添加到内容区域的开头
+        if (contentDiv.firstChild) {
+            contentDiv.insertBefore(thinkingContainer, contentDiv.firstChild);
+        } else {
+            contentDiv.appendChild(thinkingContainer);
+        }
+        
+        // 打开侧边栏
+        document.getElementById('sidebar').classList.add('open');
+    }
+    
+    // 更新思维内容
+    const thinkingContent = thinkingContainer.querySelector('.thinking-content');
+    const headerText = thinkingContainer.querySelector('.thinking-header span');
     
     // 解析思维过程的Markdown内容
     const htmlContent = parseMarkdown(thinkingText);
     
-    // 创建思维过程显示区域
-    const thinkingDiv = document.createElement('div');
-    thinkingDiv.className = 'thinking-process';
-    thinkingDiv.style.cssText = `
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        border-left: 4px solid #4CAF50;
-        padding: 15px;
-        margin-bottom: 20px;
-        border-radius: 8px;
-        font-style: italic;
-        color: #555;
-        position: relative;
-        overflow: hidden;
-    `;
-    
-    // 添加思考标题
-    const thinkingTitle = document.createElement('div');
-    thinkingTitle.innerHTML = '🤔 AI正在思考...';
-    thinkingTitle.style.cssText = `
-        font-weight: bold;
-        color: #4CAF50;
-        margin-bottom: 10px;
-        font-size: 14px;
-    `;
-    
-    // 添加思考内容
-    const thinkingContent = document.createElement('div');
-    thinkingContent.innerHTML = htmlContent;
-    thinkingContent.style.cssText = `
-        line-height: 1.6;
-        font-size: 13px;
-    `;
-    
-    // 添加动画效果
-    const loadingDots = document.createElement('div');
-    loadingDots.innerHTML = '<span>.</span><span>.</span><span>.</span>';
-    loadingDots.style.cssText = `
-        position: absolute;
-        top: 15px;
-        right: 15px;
-        font-size: 20px;
-        color: #4CAF50;
-    `;
-    
-    // CSS动画
-    const style = document.createElement('style');
-    style.textContent = `
-        .thinking-process .loading-dots span {
-            animation: blink 1.4s infinite both;
+    if (isComplete) {
+        headerText.innerHTML = '🧠 AI思维过程 (完成)';
+        thinkingContent.innerHTML = htmlContent;
+    } else {
+        headerText.innerHTML = '🤔 AI正在思考...';
+        thinkingContent.innerHTML = htmlContent + '<span class="thinking-dots">...</span>';
+        
+        // 添加思考动画
+        const style = document.createElement('style');
+        style.textContent = `
+            .thinking-dots {
+                animation: blink 1.4s infinite both;
+                color: #4CAF50;
+                font-weight: bold;
+            }
+            @keyframes blink {
+                0%, 80%, 100% { opacity: 0; }
+                40% { opacity: 1; }
+            }
+        `;
+        if (!document.querySelector('style[data-thinking-animation]')) {
+            style.setAttribute('data-thinking-animation', 'true');
+            document.head.appendChild(style);
         }
-        .thinking-process .loading-dots span:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-        .thinking-process .loading-dots span:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-        @keyframes blink {
-            0%, 80%, 100% { opacity: 0; }
-            40% { opacity: 1; }
-        }
-    `;
-    if (!document.querySelector('style[data-thinking-animation]')) {
-        style.setAttribute('data-thinking-animation', 'true');
-        document.head.appendChild(style);
     }
-    
-    loadingDots.className = 'loading-dots';
-    
-    thinkingDiv.appendChild(thinkingTitle);
-    thinkingDiv.appendChild(thinkingContent);
-    thinkingDiv.appendChild(loadingDots);
-    
-    // 清空内容区域并添加思维过程
-    contentDiv.innerHTML = '';
-    contentDiv.appendChild(thinkingDiv);
-    
-    // 打开侧边栏
-    document.getElementById('sidebar').classList.add('open');
     
     // 渲染数学公式
     if (typeof MathJax !== 'undefined') {
-        MathJax.typesetPromise([contentDiv]).catch((e) => console.error('MathJax rendering error:', e));
+        MathJax.typesetPromise([thinkingContent]).catch((e) => console.error('MathJax rendering error:', e));
     }
+    
+    // 自动滚动到思维内容底部（但不影响主文档滚动）
+    thinkingContent.scrollTop = thinkingContent.scrollHeight;
     
     if (network) {
         setTimeout(() => network.fit(), 300);
+    }
+}
+
+// 显示完整文档（包含思维过程和最终内容）
+function displayDocumentWithThinking(title, thinkingText, finalContent) {
+    document.getElementById('documentTitle').textContent = title;
+    const contentDiv = document.getElementById('documentContent');
+    
+    // 保存当前滚动位置
+    const currentScrollTop = contentDiv.scrollTop;
+    
+    // 显示完成的思维过程
+    displayThinkingProcess(title, thinkingText, true);
+    
+    // 创建或更新最终内容区域
+    let finalContentDiv = document.getElementById('final-content');
+    if (!finalContentDiv) {
+        finalContentDiv = document.createElement('div');
+        finalContentDiv.id = 'final-content';
+        finalContentDiv.className = 'document-view';
+        finalContentDiv.style.cssText = `
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        `;
+        contentDiv.appendChild(finalContentDiv);
+    }
+    
+    // 解析并显示最终内容
+    const htmlContent = parseMarkdown(finalContent);
+    finalContentDiv.innerHTML = htmlContent;
+    
+    // 渲染数学公式
+    if (typeof MathJax !== 'undefined') {
+        MathJax.typesetPromise([finalContentDiv]).catch((e) => console.error('MathJax rendering error:', e));
+    }
+    
+    // 恢复滚动位置（保持用户的阅读位置）
+    if (currentScrollTop > 0) {
+        contentDiv.scrollTop = currentScrollTop;
     }
 }
 

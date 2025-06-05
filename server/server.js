@@ -18,13 +18,13 @@ let apiConfigs = {
       name: 'DeepSeek R1',
       url: 'https://api.deepseek.com/chat/completions',
       key: '',
-      model: 'deepseek-chat'
+      model: 'deepseek-reasoner'
     }
   },
   prompts: {
     default: {
       name: '默认模板',
-      template: '<think>\n我需要为学生解释{concept}这个概念。让我先思考一下如何用高中生能理解的语言来解释这个概念，包括背景、问题、解决思路和具体过程。\n\n首先，我需要考虑：\n1. 这个概念解决了什么实际问题？\n2. 人们是如何发现或发明这个概念的？\n3. 有什么生动的比喻可以帮助理解？\n4. 如何从基础原理推导到最终结论？\n</think>\n\n你是一位擅长教授陌生概念给学生的老师。生成一份学习{concept}的文档，尽量用高中毕业生能听懂的语言，如果你不得不使用无法立即理解的前置概念，你就先用高中生能听懂的语言先解释前置概念，然后从背景-人们面对的问题开始说起，如果有从问题-灵感-构建为数学语言-推导得出结论的过程就最好了，如果你只知道有个公式，没有探索得到公式的过程的资料，你就想想如果是你，遇到那样的问题，你会怎么思考，怎么得到问题的解决方案。因为任何公式都不是凭空产生的，每一个步骤都有迹可循。你可以试着模拟一个具体的人们遇到的问题，然后思考如何解决。注意不要直接套用公式，那样对于学习没有意义。我们的目的是学习前人解决问题的思考方式。语言生动有趣，优先物理直觉，参考网页版的叙事风格和比喻方式'
+      template: '你是一位擅长教授陌生概念给学生的老师。生成一份学习{concept}的文档，尽量用人能听懂的语言，如果你不得不使用无法立即理解的前置概念去解释，你就先用人能听懂的语言先解释前置概念，然后从背景-人们当初面对的问题开始说起，如果有从问题-灵感-构建为数学语言-推导得出结论的过程就最好了，如果你只知道有个公式，没有探索得到公式的过程的资料，你就想想如果是你，遇到那样的问题，你会怎么思考，怎么得到问题的解决方案。因为任何公式都不是凭空产生的，每一个步骤都有迹可循。你可以试着模拟一个具体的人们遇到的问题，然后思考如何解决。注意不要直接套用公式，那样对于学习没有意义。我们的目的是学习前人解决问题的思考方式。语言生动有趣，优先物理直觉'
     }
   }
 };
@@ -105,7 +105,7 @@ app.post('/api/generate-document', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders(); // 立刻发送头部信息
-  const { concept, modelId = 'deepseek', promptId = 'default' } = req.body;
+  const { concept, modelId = 'deepseek', promptId = 'default', nodeChain = [] } = req.body;
   
   if (!concept) {
     return res.status(400).json({ error: 'Concept cannot be empty' });
@@ -121,23 +121,39 @@ app.post('/api/generate-document', async (req, res) => {
     return res.status(400).json({ error: 'Prompt template not found' });
   }
 
-  // 替换模板中的占位符
-  const prompt = promptTemplate.template.replace(/{concept}/g, concept);
+  // 构建消息数组，包含历史对话信息
+  const messages = [];
+  
+  // 如果有节点链历史，添加历史对话
+  if (nodeChain && nodeChain.length > 0) {
+    nodeChain.forEach((node, index) => {
+      if (node.concept && node.document) {
+        // 添加用户消息（概念）
+        messages.push({
+          role: 'user',
+          content: promptTemplate.template.replace(/{concept}/g, node.concept)
+        });
+        // 添加助手回复（文档内容）
+        messages.push({
+          role: 'assistant',
+          content: node.document
+        });
+      }
+    });
+  }
+  
+  // 添加当前概念的用户消息
+  const currentPrompt = promptTemplate.template.replace(/{concept}/g, concept);
+  messages.push({
+    role: 'user',
+    content: currentPrompt
+  });
 
   try {
     const streamResponse = await axios.post(model.url, {
       model: model.model, // 用户提供的示例中是 deepseek-reasoner，但这里我们使用配置中的 model
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0, 
-      top_p: 0.95,       // 增加语言多样性
-      max_tokens: 16000,  // 进一步增加内容空间，避免因知识树内容增多导致生成截止
-      presence_penalty: 0.3,  // 避免重复内容
-      frequency_penalty: 0.2,  // 鼓励多样表达
+      messages: messages,
+      max_tokens: 128000,  // 进一步增加内容空间，避免因知识树内容增多导致生成截止
       stream: true // 启用流式响应
     }, {
       headers: {
@@ -174,10 +190,22 @@ app.post('/api/generate-document', async (req, res) => {
             }
             try {
               const parsed = JSON.parse(jsonData);
-              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
-                const contentPart = parsed.choices[0].delta.content;
-                // console.log('Sending content part:', contentPart); // 调试发送的内容
-                res.write(`data: ${JSON.stringify({ content: contentPart })}\n\n`);
+              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
+                const delta = parsed.choices[0].delta;
+                
+                // 处理思维过程内容 (reasoning_content)
+                if (delta.reasoning_content) {
+                  const reasoningPart = delta.reasoning_content;
+                  // console.log('Sending reasoning part:', reasoningPart);
+                  res.write(`data: ${JSON.stringify({ reasoning_content: reasoningPart })}\n\n`);
+                }
+                
+                // 处理最终内容 (content)
+                if (delta.content) {
+                  const contentPart = delta.content;
+                  // console.log('Sending content part:', contentPart);
+                  res.write(`data: ${JSON.stringify({ content: contentPart })}\n\n`);
+                }
               } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason) {
                 // console.log('Stream finished, reason:', parsed.choices[0].finish_reason);
                 // 可以根据 finish_reason 做一些处理，例如如果是因为长度限制结束
