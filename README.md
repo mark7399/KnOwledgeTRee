@@ -1,6 +1,6 @@
 # 知识树 - 概念学习工具
 
-一个基于AI的知识树生成工具，
+一个基于AI的本地知识树生成工具。
 
 ## 功能特点
 
@@ -24,10 +24,11 @@
 ### 1. 下载项目
 
 ```bash
-git clone https://github.com/your-username/knowledge-tree-app.git
-cd knowledge-tree-app
+git clone https://github.com/mark7399/KnOwledgeTRee
+.git
+cd KnOwledgeTRee
 ```
-
+或者直接下载文件夹到本地。
 
 ### 2. 安装Node.js
 
@@ -45,33 +46,17 @@ npm --version
 npm install
 ```
 
-### 4. 配置API密钥
-
-首次使用前，您需要配置AI模型的API密钥：
-
-1. 复制配置模板文件：
-   ```bash
-   cp config.example.json config.json
-   ```
-   
-   在Windows上使用：
-   ```cmd
-   copy config.example.json config.json
-   ```
-
-2. 编辑 `config.json` 文件，将 `YOUR_DEEPSEEK_API_KEY_HERE` 替换为您的实际API密钥
-
-3. 或者在应用启动后，点击"API设置"按钮进行配置
+### 4. 在应用启动后，点击"API设置"按钮进行配置
 
 ### 5. 运行应用
 
-#### 桌面应用模式（推荐）
-```bash
+#### 桌面应用模式
+```bash（在下载的文件夹中点击文件地址空白处，改为cmd，按Enter直接进入该文件夹的终端）
 npm start
 ```
 
 #### Web浏览器模式
-```bash
+```bash（在下载的文件夹中点击文件地址空白处，改为cmd，按Enter直接进入该文件夹的终端）
 npm run start:web
 ```
 
@@ -109,7 +94,7 @@ npm run start:web
 
 ## API配置
 
-目前支持DeepSeek R1模型，您需要：
+目前已支持DeepSeek R1模型，您需要：
 
 1. 前往 [DeepSeek官网](https://platform.deepseek.com/) 注册账号
 2. 获取API Key
@@ -234,7 +219,7 @@ npm run dev
 
 ## 许可证
 
-ISC License
+MIT License
 
 ## 支持
 
