@@ -62,11 +62,14 @@ npm run start:web
 
 ## API配置
 
-目前已支持DeepSeek R1模型，您需要：
+目前已支持DeepSeek R1和DeepSeek V3模型，您需要：
 
 1. 前往 [DeepSeek官网](https://platform.deepseek.com/) 注册账号
 2. 获取API Key
-3. 在应用的API设置中填入您的Key 和对应模型名称，如（deepseek-reasoner） 和URL:https://api.deepseek.com/chat/completions
+3. 在应用的API设置中填入您的API Key
+   - DeepSeek R1 (推理模型): deepseek-reasoner
+   - DeepSeek V3 (对话模型): deepseek-chat
+   - API地址: https://api.deepseek.com/v1/chat/completions
 
 ## Mac系统兼容性
 
@@ -78,7 +81,7 @@ npm run start:web
 - **可视化**：vis-network
 - **桌面应用**：Electron
 - **后端**：Node.js + Express
-- **AI接口**：DeepSeek API
+- **AI接口**：DeepSeek API (支持R1推理模型和V3对话模型)
 - **依赖管理**：npm
 - **跨平台支持**：Node.js + Electron
 

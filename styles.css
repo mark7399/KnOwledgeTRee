@@ -335,11 +335,11 @@ body {
 /* 模型选择器 */
 .model-select {
     padding: 8px 12px;
-    border: 1px solid #e1e4e8;
-    border-radius: 6px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
     font-size: 14px;
-    background: #fff;
-    cursor: pointer;
+    margin-left: 10px;
 }
 
 /* 加载动画 - 暂时禁用 */

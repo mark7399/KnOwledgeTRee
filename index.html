@@ -42,13 +42,17 @@
                 <button class="btn" onclick="loadTree()">
                     <span class="icon">📁</span> 加载
                 </button>
+                <button class="btn btn-secondary" id="editDocumentBtn" onclick="toggleEditMode()" style="display:none;">
+                    <span class="icon">✏️</span> 编辑文档
+                </button>
             </div>
             <div class="toolbar-section">
                 <button class="btn" onclick="showSettings()">
                     <span class="icon">⚙️</span> 设置
                 </button>
                 <select id="modelSelect" class="model-select">
-                    <option value="deepseek">DeepSeek R1</option>
+                    <option value="deepseek-reasoner">DeepSeek R1 (推理模型)</option>
+                    <option value="deepseek-chat">DeepSeek V3 (对话模型)</option>
                 </select>
             </div>
         </header>
@@ -109,7 +113,7 @@
                     <div class="models-list" id="modelsList">
                         <!-- 动态生成的模型配置 -->
                     </div>
-                    <button class="btn btn-secondary" onclick="addModel()">+ 添加新模型</button>
+                    <p class="settings-note">注意：知识树专为DeepSeek模型优化，仅支持配置这两个模型的API Key。</p>
                 </div>
                 
                 <!-- 提示词模板 -->

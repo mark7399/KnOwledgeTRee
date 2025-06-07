@@ -7,6 +7,7 @@ const fsSync = require('fs');  // 添加同步文件系统模块用于监听
 const PORT = process.env.PORT || 3000;
 const app = express();
 
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..')));
@@ -14,17 +15,23 @@ app.use(express.static(path.join(__dirname, '..')));
 // 存储API配置
 let apiConfigs = {
   models: {
-    deepseek: {
-      name: 'DeepSeek R1',
-      url: 'https://api.deepseek.com/chat/completions',
+    'deepseek-reasoner': {
+      name: 'DeepSeek R1 (推理模型)',
+      url: 'https://api.deepseek.com/v1/chat/completions',
       key: '',
       model: 'deepseek-reasoner'
+    },
+    'deepseek-chat': {
+      name: 'DeepSeek V3 (对话模型)',
+      url: 'https://api.deepseek.com/v1/chat/completions',
+      key: '',
+      model: 'deepseek-chat'
     }
   },
   prompts: {
     default: {
       name: '默认模板',
-      template: '你是一位擅长教授陌生概念给学生的老师。生成一份学习{concept}的文档，尽量用人能听懂的语言，如果你不得不使用无法立即理解的前置概念去解释，你就先用人能听懂的语言先解释前置概念，然后从背景-人们当初面对的问题开始说起，如果有从问题-灵感-构建为数学语言-推导得出结论的过程就最好了，如果你只知道有个公式，没有探索得到公式的过程的资料，你就想想如果是你，遇到那样的问题，你会怎么思考，怎么得到问题的解决方案。因为任何公式都不是凭空产生的，每一个步骤都有迹可循。你可以试着模拟一个具体的人们遇到的问题，然后思考如何解决。注意不要直接套用公式，那样对于学习没有意义。我们的目的是学习前人解决问题的思考方式。语言生动有趣，优先物理直觉'
+      template: '你是一位擅长用生动形象的语言教授数学和编程概念的老师。请为{concept}生成一份学习文档，要求：\n\n1. **语言风格**：用生动有趣、通俗易懂的语言，多用比喻、类比和具体例子来解释抽象概念\n2. **结构安排**：从背景故事开始 → 遇到的实际问题 → 思考过程 → 解决方案的演化 → 最终的数学/编程表达\n3. **解释方式**：\n   - 优先使用物理直觉和日常生活中的类比\n   - 把抽象概念比作具体可感知的事物\n   - 用"就像..."、"好比..."、"想象一下..."等表达方式\n   - 避免直接抛出公式，而是解释公式背后的思考逻辑\n4. **前置概念**：如需使用复杂概念，先用简单语言解释，确保读者能跟上思路\n5. **实用性**：结合具体应用场景，让读者明白"为什么要学这个"和"这个概念在现实中如何使用"\n\n请用这种生动形象的教学方式，帮助学生真正理解{concept}的本质和应用。'
     }
   }
 };
@@ -48,8 +55,11 @@ async function loadConfig() {
     
     // 兼容旧配置格式
     if (config.apiConfigs && config.apiConfigs.deepseek) {
-      apiConfigs.models.deepseek = {
-        name: 'DeepSeek R1',
+      // 迁移旧的deepseek配置到新的deepseek-reasoner
+      apiConfigs.models['deepseek-reasoner'] = {
+        name: 'DeepSeek R1 (推理模型)',
+        url: 'https://api.deepseek.com/v1/chat/completions',
+        model: 'deepseek-reasoner',
         ...config.apiConfigs.deepseek
       };
     }
@@ -105,7 +115,7 @@ app.post('/api/generate-document', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders(); // 立刻发送头部信息
-  const { concept, modelId = 'deepseek', promptId = 'default', nodeChain = [] } = req.body;
+  const { concept, modelId = 'deepseek-reasoner', promptId = 'default', nodeChain = [] } = req.body;
   
   if (!concept) {
     return res.status(400).json({ error: 'Concept cannot be empty' });
@@ -150,77 +160,95 @@ app.post('/api/generate-document', async (req, res) => {
   });
 
   try {
-    const streamResponse = await axios.post(model.url, {
-      model: model.model, // 用户提供的示例中是 deepseek-reasoner，但这里我们使用配置中的 model
+    // 根据不同模型设置不同的API参数
+    let requestBody = {
+      model: model.model,
       messages: messages,
-      max_tokens: 128000,  // 进一步增加内容空间，避免因知识树内容增多导致生成截止
-      stream: true // 启用流式响应
-    }, {
+      stream: true
+    };
+    
+    // 为不同模型设置不同的参数
+    if (model.model === 'deepseek-reasoner') {
+      // deepseek-reasoner 参数设置
+      // 最大输出32K tokens（默认），最大64K tokens
+      requestBody.max_tokens = 32768; // 使用较大的token数以支持长文档生成
+      // 注意：deepseek-reasoner 不支持 temperature, top_p, presence_penalty, frequency_penalty
+    } else if (model.model === 'deepseek-chat') {
+      // deepseek-chat 参数设置
+      // 最大输出4K tokens（默认），最大8K tokens
+      requestBody.max_tokens = 8192;
+      // 为学习数学和编程设置合适的参数
+      requestBody.temperature = 0.6; // 适合一般对话和解释概念
+      requestBody.top_p = 0.9;
+      requestBody.presence_penalty = 0;
+      requestBody.frequency_penalty = 0;
+    }
+    
+    const streamResponse = await axios.post(model.url, requestBody, {
       headers: {
         'Authorization': `Bearer ${model.key}`,
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream' // 明确告诉API我们期望流式响应
+        'Accept': 'text/event-stream'
       },
-      responseType: 'stream', // 告诉axios期望一个流
-      timeout: 30000, // 30秒超时
-      // 添加连接超时设置
+      responseType: 'stream',
       httpsAgent: new (require('https').Agent)({
-        timeout: 10000, // 连接超时10秒
-        keepAlive: true
+        keepAlive: true,
+        keepAliveMsecs: 30000,
+        maxSockets: 5
       })
     });
+    
+
+    
+
 
     streamResponse.data.on('data', (chunk) => {
       // DeepSeek API 返回的流数据格式通常是 JSON lines (ndjson)
-      // 每个 chunk 可能包含一个或多个 JSON 对象，或者一个 JSON 对象的一部分
-      // 我们需要解析这些 JSON 对象并提取 'choices[0].delta.content'
       const chunkStr = chunk.toString();
-      // console.log('Raw chunk:', chunkStr); // 调试原始数据块
+      
       try {
-        // 尝试按行分割，因为 DeepSeek 通常是 JSON lines
+        // 按行分割处理
         const lines = chunkStr.split('\n').filter(line => line.trim() !== '');
         for (const line of lines) {
+          // 处理 DeepSeek API 的 SSE keep-alive 注释
+          if (line.trim().startsWith(': keep-alive') || line.trim().startsWith(':')) {
+            continue;
+          }
+          
           if (line.startsWith('data: ')) {
             const jsonData = line.substring(5).trim();
             if (jsonData === '[DONE]') {
-              // console.log('Stream finished with [DONE]');
-              res.write('data: [DONE]\n\n'); // 发送结束信号
+              res.write('data: [DONE]\n\n');
               res.end();
               return;
             }
+            
             try {
               const parsed = JSON.parse(jsonData);
               if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
                 const delta = parsed.choices[0].delta;
                 
-                // 处理思维过程内容 (reasoning_content)
+                // 处理思维过程内容 - 直接发送完整块
                 if (delta.reasoning_content) {
-                  const reasoningPart = delta.reasoning_content;
-                  // console.log('Sending reasoning part:', reasoningPart);
-                  res.write(`data: ${JSON.stringify({ reasoning_content: reasoningPart })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ reasoning_content: delta.reasoning_content })}\n\n`);
+                  if (res.flush) res.flush();
                 }
                 
-                // 处理最终内容 (content)
+                // 处理最终内容 - 直接发送完整块
                 if (delta.content) {
-                  const contentPart = delta.content;
-                  // console.log('Sending content part:', contentPart);
-                  res.write(`data: ${JSON.stringify({ content: contentPart })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`);
+                  if (res.flush) res.flush();
                 }
-              } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason) {
-                // console.log('Stream finished, reason:', parsed.choices[0].finish_reason);
-                // 可以根据 finish_reason 做一些处理，例如如果是因为长度限制结束
               }
             } catch (jsonParseError) {
-              // console.error('Error parsing JSON line:', jsonParseError, 'Line:', jsonData);
-              // 忽略无法解析的行，或者记录错误
+              // 忽略无法解析的行
+              continue;
             }
-          } else {
-            // console.log('Non-data line received:', line); // 调试非数据行
           }
         }
       } catch (e) {
-        // console.error('Error processing chunk:', e, 'Chunk:', chunkStr);
-        // 如果整个块处理失败，可能需要发送错误信号或记录
+        // 处理块解析错误
+        console.error('Error processing chunk:', e.message);
       }
     });
 
@@ -230,19 +258,16 @@ app.post('/api/generate-document', async (req, res) => {
       res.end();
     });
 
-    streamResponse.data.on('error', (streamError) => {
-      console.error('Error in API stream:', streamError);
-      res.write(`data: ${JSON.stringify({ error: 'Stream error from API', details: streamError.message })}\n\n`);
-      res.end();
-    });
+
   } catch (error) {
-    console.error('Failed to generate document:', error.response?.data || error.message);
-    // 流式处理中，错误已在 streamResponse.data.on('error', ...) 中处理
-    // 如果初始请求就失败（例如网络问题或配置错误），这里的 catch 仍然会捕获
-    if (!res.writableEnded) { // 确保在流未结束时才发送错误
-        console.error('Failed to initiate document generation stream:', error.message);
-        res.write(`data: ${JSON.stringify({ error: 'Failed to initiate stream', details: error.message })}\n\n`);
-        res.end();
+    console.error('API request failed:', error.message);
+    // 发送错误响应并结束连接
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to generate document' });
+    } else {
+      // 如果已经开始流式传输，发送错误信号并结束
+      res.write('data: [ERROR]\n\n');
+      res.end();
     }
   }
 });

@@ -11,7 +11,7 @@ let currentConfig = {
     prompts: {}
 };
 let selectedPromptId = 'default';
-let currentModelId = ''; // 跟踪当前选择的模型
+let currentModelId = 'deepseek-reasoner'; // 跟踪当前选择的模型
 
 // 全局变量
 let currentLoadedFilename = null; // 用于自动保存当前加载的文件名
@@ -274,6 +274,8 @@ function setupEventListeners() {
         }
     });
     
+
+
     // 监听Electron菜单事件
     if (window.electronAPI) {
         window.electronAPI.onNewTree(() => {
@@ -322,11 +324,39 @@ function showNewNodeDialog(parentId = null) {
     input.value = '';
     dialog.classList.add('show');
     
-    setTimeout(() => {
-        input.focus();
-        input.disabled = false;
-        input.readOnly = false;
-    }, 100);
+    // 多次尝试设置焦点，解决启动时无法选中的问题
+    const tryFocus = (attempt = 0) => {
+        if (attempt < 5) {
+            setTimeout(() => {
+                input.disabled = false;
+                input.readOnly = false;
+                input.focus();
+                input.click();
+                input.select();
+                
+                // 检查是否成功获得焦点
+                if (document.activeElement !== input) {
+                    console.log(`Focus attempt ${attempt + 1} failed, retrying...`);
+                    tryFocus(attempt + 1);
+                } else {
+                    console.log(`Focus successful on attempt ${attempt + 1}`);
+                }
+            }, 100 + attempt * 200); // 递增延迟
+        } else {
+            console.warn('Failed to focus input after 5 attempts');
+            // 最后一次尝试：强制触发点击事件
+            setTimeout(() => {
+                input.disabled = false;
+                input.readOnly = false;
+                const event = new MouseEvent('click', { bubbles: true });
+                input.dispatchEvent(event);
+                input.focus();
+                input.select();
+            }, 500);
+        }
+    };
+    
+    tryFocus();
     
     // 只保留Escape键处理，Enter键已在setupEventListeners中处理
     input.onkeydown = function(e) {
@@ -501,13 +531,7 @@ async function showDocument(nodeId) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            try {
-                const errorData = JSON.parse(errorText);
-                throw new Error(errorData.error || `生成文档请求失败: ${response.status}`);
-            } catch (e) {
-                throw new Error(`生成文档请求失败: ${response.status} - ${errorText}`);
-            }
+            return; // 静默处理请求失败
         }
 
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -520,6 +544,7 @@ async function showDocument(nodeId) {
         
         // eslint-disable-next-line no-constant-condition
         while (true) {
+            
             const { value, done } = await reader.read();
             if (done) {
                 // console.log('Stream finished.');
@@ -547,6 +572,13 @@ async function showDocument(nodeId) {
                         autoSaveTree(); 
                         return; 
                     }
+                    if (jsonData === '[ERROR]') {
+                        // 收到错误信号，停止处理
+                        console.warn('Received error signal from server');
+                        generatingNodes.delete(nodeId);
+                        document.getElementById('documentTitle').textContent = node.label + ' - 生成失败';
+                        return;
+                    }
                     try {
                         const parsed = JSON.parse(jsonData);
                         
@@ -556,12 +588,9 @@ async function showDocument(nodeId) {
                             
                             if (!hasStartedReasoning) {
                                 hasStartedReasoning = true;
-                                // 首次显示思维过程
-                                displayThinkingProcess(node.label, reasoningContent, false);
-                            } else {
-                                // 更新思维过程
-                                displayThinkingProcess(node.label, reasoningContent, false);
                             }
+                            // 更新思维过程显示
+                            displayThinkingProcess(node.label, reasoningContent, false);
                         }
                         
                         // 处理最终内容
@@ -573,33 +602,37 @@ async function showDocument(nodeId) {
                                 // 思维过程完成，开始显示最终内容
                                 if (hasStartedReasoning && reasoningContent) {
                                     displayThinkingProcess(node.label, reasoningContent, true);
-                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent + '\n\n...正在生成...');
+                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent, true);
                                 } else {
                                     // 没有思维过程，直接显示文档
-                                    displayDocument(node.label, finalContent + '\n\n...正在生成...');
+                                    displayDocument(node.label, finalContent, true, true);
                                 }
                             } else {
-                                // 更新最终内容
+                                // 更新最终内容时，添加实时数学公式渲染
                                 if (hasStartedReasoning && reasoningContent) {
-                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent + '\n\n...正在生成...');
+                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent, true);
                                 } else {
-                                    displayDocument(node.label, finalContent + '\n\n...正在生成...');
+                                    displayDocument(node.label, finalContent, true, true);
+                                }
+                                
+                                // 实时数学公式渲染
+                                if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
+                                    const documentView = document.getElementById('documentView');
+                                    if (documentView) {
+                                        MathJax.typesetClear([documentView]);
+                                        MathJax.typesetPromise([documentView]).catch((e) => 
+                                            console.error('MathJax real-time rendering error:', e)
+                                        );
+                                    }
                                 }
                             }
-                            
-                            // 确保数学公式在流式输出时也能正确渲染
-                            setTimeout(() => {
-                                if (typeof MathJax !== 'undefined') {
-                                    const documentContentDiv = document.getElementById('documentContent');
-                                    MathJax.typesetPromise([documentContentDiv]).catch((e) => console.error('MathJax streaming render error:', e));
-                                }
-                            }, 100);
-                        } else if (parsed.error) {
-                            console.error('Error from stream:', parsed.details || parsed.error);
-                            throw new Error(parsed.details || parsed.error);
                         }
                     } catch (e) {
-                        // console.warn('Could not parse JSON from stream line:', jsonData, e);
+                        // 如果是JSON解析错误，记录但继续处理
+                        if (jsonData.trim() && !jsonData.includes('[DONE]') && !jsonData.includes('[ERROR]')) {
+                            console.warn('Skipping invalid JSON chunk:', jsonData.substring(0, 50));
+                        }
+                        continue; // 跳过这个无效的数据块，继续处理下一个
                     }
                 }
             }
@@ -619,21 +652,18 @@ async function showDocument(nodeId) {
         generatingNodes.delete(nodeId); // 移除生成状态
         autoSaveTree();
 
-    } catch (error) {
-        console.error('生成文档失败详情:', error);
-        alert('生成文档失败: ' + error.message);
-        displayDocument(node.label, `生成失败: ${error.message}`, false);
+    } finally {
         generatingNodes.delete(nodeId); // 移除生成状态
     }
 }
 
 // 显示文档内容
-function displayDocument(title, content, isMarkdown = true) {
+function displayDocument(title, content, isMarkdown = true, isStreaming = false) {
     const titleElement = document.getElementById('documentTitle');
     const contentDiv = document.getElementById('documentContent');
     
-    // 保存当前滚动位置
-    const currentScrollTop = contentDiv.scrollTop;
+    // 只在非流式更新时保存滚动位置
+    const currentScrollTop = isStreaming ? null : contentDiv.scrollTop;
     const hadContent = contentDiv.innerHTML.trim() !== '';
     
     titleElement.textContent = title;
@@ -644,38 +674,34 @@ function displayDocument(title, content, isMarkdown = true) {
     // 获取或创建 documentView 元素
     let documentView = document.getElementById('documentView');
     if (!documentView) {
-        // 检查是否已有思维过程容器
-        const thinkingContainer = document.getElementById('thinking-container');
-        
-        if (thinkingContainer) {
-            // 如果已有思维过程容器，在其后添加文档内容
-            const documentStructure = `
-                <div class="document-view" id="documentView"></div>
-                <div class="document-edit-controls">
-                    <button class="btn btn-secondary" onclick="toggleEditMode()">编辑文档</button>
-                    <button class="btn btn-primary" id="saveDocumentBtn" style="display:none;" onclick="saveDocumentChanges()">保存更改</button>
-                    <button class="btn" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">取消</button>
-                </div>
-                <textarea class="document-editor" id="documentEditor" style="display:none;" data-original-content="${content.replace(/"/g, '&quot;')}"></textarea>
-            `;
-            thinkingContainer.insertAdjacentHTML('afterend', documentStructure);
-        } else {
-            // 如果没有思维过程容器，则构建完整的结构
-            contentDiv.innerHTML = `
-                <div class="document-view" id="documentView"></div>
-                <div class="document-edit-controls">
-                    <button class="btn btn-secondary" onclick="toggleEditMode()">编辑文档</button>
-                    <button class="btn btn-primary" id="saveDocumentBtn" style="display:none;" onclick="saveDocumentChanges()">保存更改</button>
-                    <button class="btn" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">取消</button>
-                </div>
-                <textarea class="document-editor" id="documentEditor" style="display:none;" data-original-content="${content.replace(/"/g, '&quot;')}"></textarea>
-            `;
-        }
+        contentDiv.innerHTML = `
+            <div class="document-view" id="documentView"></div>
+            <textarea class="document-editor" id="documentEditor" style="display:none;"></textarea>
+        `;
         documentView = document.getElementById('documentView');
     }
 
     // 更新 documentView 的内容
     documentView.innerHTML = htmlContent;
+    
+    // 显示顶部编辑按钮
+    const editDocumentBtn = document.getElementById('editDocumentBtn');
+    if (editDocumentBtn) {
+        editDocumentBtn.style.display = 'inline-block';
+    }
+    
+    // 添加编辑控制按钮容器（如果不存在）
+    if (!document.getElementById('editControlButtons')) {
+        const editControlDiv = document.createElement('div');
+        editControlDiv.id = 'editControlButtons';
+        editControlDiv.className = 'document-edit-controls';
+        editControlDiv.style.display = 'none';
+        editControlDiv.innerHTML = `
+            <button class="btn btn-primary" id="saveDocumentBtn" onclick="saveDocumentChanges()">保存更改</button>
+            <button class="btn" id="cancelEditBtn" onclick="cancelEdit()">取消</button>
+        `;
+        documentView.parentNode.insertBefore(editControlDiv, documentView.nextSibling);
+    }
     
     // 更新 documentEditor 的内容和 data-original-content
     const documentEditor = document.getElementById('documentEditor');
@@ -689,15 +715,17 @@ function displayDocument(title, content, isMarkdown = true) {
 
     // 渲染数学公式并恢复滚动位置
     if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
+        // 清除之前的MathJax处理，重新渲染
+        MathJax.typesetClear([documentView]);
         MathJax.typesetPromise([documentView]).then(() => {
-            // 恢复滚动位置，确保在 MathJax 渲染后保持用户位置
-            if (hadContent) {
+            // 只在非流式更新时恢复滚动位置
+            if (!isStreaming && hadContent && currentScrollTop > 0) {
                 contentDiv.scrollTop = currentScrollTop;
             }
         }).catch(e => console.error('MathJax displayDocument error:', e));
     } else {
-        // 如果没有 MathJax，直接恢复滚动位置
-        if (hadContent) {
+        // 只在非流式更新时恢复滚动位置
+        if (!isStreaming && hadContent && currentScrollTop > 0) {
             contentDiv.scrollTop = currentScrollTop;
         }
     }
@@ -712,15 +740,15 @@ function displayDocument(title, content, isMarkdown = true) {
 function toggleEditMode() {
     const view = document.getElementById('documentView');
     const editor = document.getElementById('documentEditor');
-    const editBtn = document.querySelector('.document-edit-controls button');
-    const saveBtn = document.getElementById('saveDocumentBtn');
-    const cancelBtn = document.getElementById('cancelEditBtn');
+    const editBtn = document.getElementById('editDocumentBtn');
+    const editControlButtons = document.getElementById('editControlButtons');
     
     view.style.display = 'none';
     editor.style.display = 'block';
     editBtn.style.display = 'none';
-    saveBtn.style.display = 'inline-block';
-    cancelBtn.style.display = 'inline-block';
+    if (editControlButtons) {
+        editControlButtons.style.display = 'block';
+    }
     
     // 设置编辑器内容为原始Markdown内容
     const originalContent = editor.getAttribute('data-original-content');
@@ -763,15 +791,15 @@ function saveDocumentChanges() {
 function cancelEdit() {
     const view = document.getElementById('documentView');
     const editor = document.getElementById('documentEditor');
-    const editBtn = document.querySelector('.document-edit-controls button');
-    const saveBtn = document.getElementById('saveDocumentBtn');
-    const cancelBtn = document.getElementById('cancelEditBtn');
+    const editBtn = document.getElementById('editDocumentBtn');
+    const editControlButtons = document.getElementById('editControlButtons');
     
     view.style.display = 'block';
     editor.style.display = 'none';
     editBtn.style.display = 'inline-block';
-    saveBtn.style.display = 'none';
-    cancelBtn.style.display = 'none';
+    if (editControlButtons) {
+        editControlButtons.style.display = 'none';
+    }
 }
 
 // 打开侧边栏显示文档
@@ -882,34 +910,7 @@ function switchTab(tabName) {
     document.getElementById(tabName + 'Tab').classList.add('active');
 }
 
-// 添加新模型
-function addModel() {
-    const modelId = 'model_' + Date.now();
-    const modelsList = document.getElementById('modelsList');
-    
-    const modelItem = document.createElement('div');
-    modelItem.className = 'model-item';
-    modelItem.dataset.modelId = modelId;
-    modelItem.innerHTML = `
-        <div class="item-header">
-            <input type="text" placeholder="模型名称" class="input-field model-name" value="新模型">
-            <button class="btn-remove" onclick="removeModel('${modelId}')">删除</button>
-        </div>
-        <input type="text" placeholder="API URL" class="input-field model-url">
-        <input type="password" placeholder="API Key" class="input-field model-key">
-        <input type="text" placeholder="模型名 (如: gpt-3.5-turbo)" class="input-field model-model">
-    `;
-    
-    modelsList.appendChild(modelItem);
-}
-
-// 删除模型
-function removeModel(modelId) {
-    const modelItem = document.querySelector(`[data-model-id="${modelId}"]`);
-    if (modelItem) {
-        modelItem.remove();
-    }
-}
+// 删除模型功能已移除，知识树专为DeepSeek模型优化
 
 // 添加新提示词模板
 function addPromptTemplate() {
@@ -956,12 +957,11 @@ function renderSettings() {
         modelItem.dataset.modelId = id;
         modelItem.innerHTML = `
             <div class="item-header">
-                <input type="text" placeholder="模型名称" class="input-field model-name" value="${model.name}">
-                <button class="btn-remove" onclick="removeModel('${id}')">删除</button>
+                <span class="model-name-display">${model.name}</span>
             </div>
-            <input type="text" placeholder="API URL" class="input-field model-url" value="${model.url}">
+            <input type="text" placeholder="API URL" class="input-field model-url" value="${model.url}" readonly>
             <input type="password" placeholder="API Key" class="input-field model-key" value="${model.key}">
-            <input type="text" placeholder="模型名 (如: gpt-3.5-turbo)" class="input-field model-model" value="${model.model}">
+            <input type="text" placeholder="模型名" class="input-field model-model" value="${model.model}" readonly>
         `;
         modelsList.appendChild(modelItem);
     });
@@ -987,16 +987,16 @@ function renderSettings() {
 
 // 保存API设置
 async function saveSettings() {
-    // 收集模型配置
-    const models = {};
+    // 收集模型配置（只更新API Key，其他配置保持不变）
+    const models = { ...currentConfig.models };
     document.querySelectorAll('.model-item').forEach(item => {
         const id = item.dataset.modelId;
-        models[id] = {
-            name: item.querySelector('.model-name').value,
-            url: item.querySelector('.model-url').value,
-            key: item.querySelector('.model-key').value,
-            model: item.querySelector('.model-model').value
-        };
+        if (models[id]) {
+            models[id] = {
+                ...models[id],
+                key: item.querySelector('.model-key').value
+            };
+        }
     });
     
     // 收集提示词模板
@@ -1022,11 +1022,9 @@ async function saveSettings() {
             alert('设置保存成功');
             closeDialog('settingsDialog');
             updateModelSelector();
-        } else {
-            alert('保存设置失败');
         }
     } catch (error) {
-        alert('保存设置失败: ' + error.message);
+        // 静默处理保存失败
     }
 }
 // 加载API配置
@@ -1043,6 +1041,7 @@ async function loadApiConfig() {
 // 更新模型选择器
 function updateModelSelector() {
     const selector = document.getElementById('modelSelect');
+    const currentValue = selector.value || currentModelId; // 保存当前选择的值
     selector.innerHTML = '';
     
     Object.entries(currentConfig.models).forEach(([id, model]) => {
@@ -1052,8 +1051,12 @@ function updateModelSelector() {
         selector.appendChild(option);
     });
     
-    // 设置当前模型ID为第一个模型
-    if (selector.options.length > 0) {
+    // 恢复之前选择的模型，如果不存在则使用第一个
+    if (currentValue && selector.querySelector(`option[value="${currentValue}"]`)) {
+        selector.value = currentValue;
+        currentModelId = currentValue;
+    } else if (selector.options.length > 0) {
+        selector.value = selector.options[0].value;
         currentModelId = selector.options[0].value;
     }
 }
@@ -1120,17 +1123,9 @@ async function confirmSaveTree(filenameFromDialog, isAutoSave = false) {
             } else {
                 console.log(`Tree ${pureFilename} autosaved successfully.`);
             }
-        } else {
-            const errorData = await response.json();
-            alert('保存失败: ' + (errorData.error || '未知错误'));
         }
     } catch (error) {
-        console.error('保存失败详情:', error);
-        if (!isAutoSave) {
-            alert('保存失败: ' + error.message);
-        } else {
-            console.error(`Autosave for ${filename} failed:`, error.message);
-        }
+        // 静默处理保存失败
     }
     if (!isAutoSave) {
         hideLoading();
@@ -1148,8 +1143,7 @@ async function loadTree() {
     try {
         const response = await fetch(`http://localhost:${serverPort}/api/saved-trees`);
         if (!response.ok) {
-            alert('获取文件列表失败: ' + response.statusText);
-            return;
+            return; // 静默处理获取文件列表失败
         }
         const data = await response.json();
         const trees = data.trees;
@@ -1199,8 +1193,7 @@ async function loadTree() {
         }
         
     } catch (error) { 
-        console.error('加载文件失败详情:', error);
-        alert('加载失败: ' + error.message);
+        // 静默处理加载失败
     }
 }
 
@@ -1210,8 +1203,7 @@ async function actualLoadTreeConfirmed(filename) {
     try {
         const loadResponse = await fetch(`http://localhost:${serverPort}/api/load-tree/${filename.replace(/\\/g, '/')}`);
         if (!loadResponse.ok) {
-            const errorData = await loadResponse.json().catch(() => ({ error: '加载文件失败，无法解析错误信息' }));
-            throw new Error(errorData.error || '加载文件失败');
+            return; // 静默处理加载失败
         }
 
         const treeData = await loadResponse.json();
@@ -1232,8 +1224,7 @@ async function actualLoadTreeConfirmed(filename) {
         closeDialog('loadTreeDialog'); // 关闭加载对话框
 
     } catch (error) {
-        console.error('加载文件失败详情:', error);
-        alert('加载失败: ' + error.message);
+        // 静默处理加载失败
     } finally {
         hideLoading(); // 确保在任何情况下都隐藏加载动画
     }
@@ -1254,14 +1245,9 @@ async function deleteTree(filename) {
             closeDialog('loadTreeDialog'); 
             hideLoading(); // 确保隐藏加载动画
             loadTree(); 
-        } else {
-            const errorData = await response.json().catch(() => ({ error: '删除失败，无法解析错误信息' }));
-            alert('删除失败: ' + (errorData.error || '未知错误'));
-            hideLoading(); // 确保隐藏加载动画
         }
     } catch (error) {
-        console.error('删除文件失败详情:', error);
-        alert('删除失败: ' + error.message);
+        // 静默处理删除失败
         hideLoading(); // 确保隐藏加载动画
     }
 }
@@ -1277,190 +1263,225 @@ function hideLoading() {
 }
 
 // 显示思维过程
+// 添加防抖函数
+let lastThinkingContent = '';
+
 function displayThinkingProcess(title, thinkingText, isComplete = false) {
+    // 如果内容没有变化且不是完成状态，跳过更新
+    if (!isComplete && thinkingText === lastThinkingContent) {
+        return;
+    }
+    
+    // 直接更新思维过程
+    actualUpdateThinkingProcess(title, thinkingText, isComplete);
+    
+    lastThinkingContent = thinkingText;
+}
+
+function actualUpdateThinkingProcess(title, thinkingText, isComplete = false) {
     const contentDiv = document.getElementById('documentContent');
     
-    // 查找现有的思维过程容器
-    let thinkingContainer = document.getElementById('thinking-container');
+    // 获取或创建 documentView 元素
+    let documentView = document.getElementById('documentView');
+    if (!documentView) {
+        // 创建文档视图容器，思维链和文档内容将共用这个容器
+        contentDiv.innerHTML = `
+            <div class="document-view" id="documentView"></div>
+            <textarea class="document-editor" id="documentEditor" style="display:none;"></textarea>
+        `;
+        documentView = document.getElementById('documentView');
+        
+        // 打开侧边栏
+        document.getElementById('sidebar').classList.add('open');
+    }
     
-    if (!thinkingContainer) {
-        // 创建思维过程容器
-        thinkingContainer = document.createElement('div');
-        thinkingContainer.id = 'thinking-container';
-        thinkingContainer.className = 'thinking-container';
-        
-        // 创建折叠/展开头部
-        const thinkingHeader = document.createElement('div');
-        thinkingHeader.className = 'thinking-header';
-        thinkingHeader.style.cssText = `
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 8px 8px 0 0;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-weight: bold;
-            font-size: 14px;
-            user-select: none;
-            transition: background 0.3s ease;
+    // 解析思维过程的Markdown内容
+    let htmlContent;
+    if (documentView.dataset.lastThinkingContent !== thinkingText) {
+        htmlContent = parseMarkdown(thinkingText);
+        documentView.dataset.lastThinkingContent = thinkingText;
+    } else {
+        // 使用缓存的内容，只更新状态
+        htmlContent = documentView.innerHTML.replace(/<span class="thinking-dots">\.\.\.<\/span>/, '');
+    }
+    
+    if (isComplete) {
+        // 思维过程完成，显示完整内容
+        documentView.innerHTML = `
+            <div class="thinking-section" style="
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                border-left: 4px solid #4CAF50;
+                border: 1px solid #ddd;
+                padding: 15px;
+                border-radius: 8px;
+                font-style: italic;
+                color: #555;
+                line-height: 1.6;
+                font-size: 13px;
+                margin-bottom: 20px;
+            ">
+                <div style="
+                    color: #4CAF50;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                    font-size: 14px;
+                ">🧠 AI思维过程</div>
+                ${htmlContent}
+            </div>
         `;
         
-        const headerText = document.createElement('span');
-        headerText.innerHTML = '🤔 AI思维过程';
-        
-        const toggleIcon = document.createElement('span');
-        toggleIcon.className = 'toggle-icon';
-        toggleIcon.innerHTML = '▼';
-        toggleIcon.style.cssText = `
-            transition: transform 0.3s ease;
-            font-size: 12px;
+        // 渲染数学公式（只在完成时）
+        if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
+            MathJax.typesetClear([documentView]);
+            MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
+        }
+    } else {
+        // 思维过程进行中，显示动态内容
+        documentView.innerHTML = `
+            <div class="thinking-section" style="
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                border-left: 4px solid #4CAF50;
+                border: 1px solid #ddd;
+                padding: 15px;
+                border-radius: 8px;
+                font-style: italic;
+                color: #555;
+                line-height: 1.6;
+                font-size: 13px;
+                margin-bottom: 20px;
+            ">
+                <div style="
+                    color: #4CAF50;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                    font-size: 14px;
+                ">🤔 AI正在思考...</div>
+                ${htmlContent}<span class="thinking-dots">...</span>
+            </div>
         `;
         
-        thinkingHeader.appendChild(headerText);
-        thinkingHeader.appendChild(toggleIcon);
-        
-        // 创建思维内容区域
-        const thinkingContent = document.createElement('div');
-        thinkingContent.className = 'thinking-content';
-        thinkingContent.style.cssText = `
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-left: 4px solid #4CAF50;
-            border-right: 1px solid #ddd;
-            border-bottom: 1px solid #ddd;
-            padding: 15px;
-            border-radius: 0 0 8px 8px;
-            font-style: italic;
-            color: #555;
-            max-height: 300px;
-            overflow-y: auto;
-            line-height: 1.6;
-            font-size: 13px;
-            transition: max-height 0.3s ease;
+        // 添加思考动画（只添加一次）
+        if (!document.querySelector('style[data-thinking-animation]')) {
+            const style = document.createElement('style');
+            style.textContent = `
+                .thinking-dots {
+                    animation: blink 1.4s infinite both;
+                    color: #4CAF50;
+                    font-weight: bold;
+                }
+                @keyframes blink {
+                    0%, 80%, 100% { opacity: 0; }
+                    40% { opacity: 1; }
+                }
+            `;
+            style.setAttribute('data-thinking-animation', 'true');
+            document.head.appendChild(style);
+        }
+    }
+    
+    // 减少network.fit调用频率
+    if (network && isComplete) {
+        setTimeout(() => network.fit(), 300);
+    }
+}
+
+// 显示完整文档（包含思维过程和最终内容）
+function displayDocumentWithThinking(title, thinkingText, finalContent, isStreaming = false) {
+    document.getElementById('documentTitle').textContent = title;
+    const contentDiv = document.getElementById('documentContent');
+    
+    // 只在非流式更新时保存和恢复滚动位置
+    const currentScrollTop = isStreaming ? null : contentDiv.scrollTop;
+    
+    // 获取或创建 documentView 元素
+    let documentView = document.getElementById('documentView');
+    if (!documentView) {
+        contentDiv.innerHTML = `
+            <div class="document-view" id="documentView"></div>
+            <textarea class="document-editor" id="documentEditor" style="display:none;"></textarea>
         `;
+        documentView = document.getElementById('documentView');
         
-        // 添加折叠/展开功能
-        let isCollapsed = false;
-        thinkingHeader.addEventListener('click', () => {
-            isCollapsed = !isCollapsed;
-            if (isCollapsed) {
-                thinkingContent.style.maxHeight = '0';
-                thinkingContent.style.padding = '0 15px';
-                thinkingContent.style.borderBottom = 'none';
-                toggleIcon.style.transform = 'rotate(-90deg)';
-                thinkingHeader.style.borderRadius = '8px';
-            } else {
-                thinkingContent.style.maxHeight = '300px';
-                thinkingContent.style.padding = '15px';
-                thinkingContent.style.borderBottom = '1px solid #ddd';
-                toggleIcon.style.transform = 'rotate(0deg)';
-                thinkingHeader.style.borderRadius = '8px 8px 0 0';
-            }
-        });
+        // 显示顶部编辑按钮
+        const editDocumentBtn = document.getElementById('editDocumentBtn');
+        if (editDocumentBtn) {
+            editDocumentBtn.style.display = 'inline-block';
+        }
         
-        thinkingContainer.appendChild(thinkingHeader);
-        thinkingContainer.appendChild(thinkingContent);
-        
-        // 将思维过程容器添加到内容区域的开头
-        if (contentDiv.firstChild) {
-            contentDiv.insertBefore(thinkingContainer, contentDiv.firstChild);
-        } else {
-            contentDiv.appendChild(thinkingContainer);
+        // 添加编辑控制按钮容器（如果不存在）
+        if (!document.getElementById('editControlButtons')) {
+            const editControlDiv = document.createElement('div');
+            editControlDiv.id = 'editControlButtons';
+            editControlDiv.className = 'document-edit-controls';
+            editControlDiv.style.display = 'none';
+            editControlDiv.innerHTML = `
+                <button class="btn btn-primary" id="saveDocumentBtn" onclick="saveDocumentChanges()">保存更改</button>
+                <button class="btn" id="cancelEditBtn" onclick="cancelEdit()">取消</button>
+            `;
+            documentView.parentNode.insertBefore(editControlDiv, documentView.nextSibling);
         }
         
         // 打开侧边栏
         document.getElementById('sidebar').classList.add('open');
     }
     
-    // 更新思维内容
-    const thinkingContent = thinkingContainer.querySelector('.thinking-content');
-    const headerText = thinkingContainer.querySelector('.thinking-header span');
+    // 解析思维过程和最终内容
+    const thinkingHtml = parseMarkdown(thinkingText);
+    const finalHtml = parseMarkdown(finalContent);
     
-    // 解析思维过程的Markdown内容
-    const htmlContent = parseMarkdown(thinkingText);
-    
-    if (isComplete) {
-        headerText.innerHTML = '🧠 AI思维过程 (完成)';
-        thinkingContent.innerHTML = htmlContent;
-    } else {
-        headerText.innerHTML = '🤔 AI正在思考...';
-        thinkingContent.innerHTML = htmlContent + '<span class="thinking-dots">...</span>';
-        
-        // 添加思考动画
-        const style = document.createElement('style');
-        style.textContent = `
-            .thinking-dots {
-                animation: blink 1.4s infinite both;
+    // 在同一个容器中显示思维过程和最终内容
+    documentView.innerHTML = `
+        <div class="thinking-section" style="
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-left: 4px solid #4CAF50;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            font-style: italic;
+            color: #555;
+            line-height: 1.6;
+            font-size: 13px;
+            margin-bottom: 20px;
+        ">
+            <div style="
                 color: #4CAF50;
                 font-weight: bold;
-            }
-            @keyframes blink {
-                0%, 80%, 100% { opacity: 0; }
-                40% { opacity: 1; }
-            }
-        `;
-        if (!document.querySelector('style[data-thinking-animation]')) {
-            style.setAttribute('data-thinking-animation', 'true');
-            document.head.appendChild(style);
-        }
-    }
-    
-    // 渲染数学公式
-    if (typeof MathJax !== 'undefined') {
-        MathJax.typesetPromise([thinkingContent]).catch((e) => console.error('MathJax rendering error:', e));
-    }
-    
-    // 自动滚动到思维内容底部（但不影响主文档滚动）
-    thinkingContent.scrollTop = thinkingContent.scrollHeight;
-    
-    if (network) {
-        setTimeout(() => network.fit(), 300);
-    }
-}
-
-// 显示完整文档（包含思维过程和最终内容）
-function displayDocumentWithThinking(title, thinkingText, finalContent) {
-    document.getElementById('documentTitle').textContent = title;
-    const contentDiv = document.getElementById('documentContent');
-    
-    // 保存当前滚动位置
-    const currentScrollTop = contentDiv.scrollTop;
-    
-    // 显示完成的思维过程
-    displayThinkingProcess(title, thinkingText, true);
-    
-    // 创建或更新最终内容区域
-    let finalContentDiv = document.getElementById('final-content');
-    if (!finalContentDiv) {
-        finalContentDiv = document.createElement('div');
-        finalContentDiv.id = 'final-content';
-        finalContentDiv.className = 'document-view';
-        finalContentDiv.style.cssText = `
-            margin-top: 20px;
-            padding: 20px;
+                margin-bottom: 10px;
+                font-size: 14px;
+            ">🧠 AI思维过程</div>
+            ${thinkingHtml}
+        </div>
+        <div class="final-content" style="
             background: white;
+            padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        `;
-        contentDiv.appendChild(finalContentDiv);
-    }
+            line-height: 1.6;
+        ">
+            ${finalHtml}
+        </div>
+    `;
     
-    // 解析并显示最终内容
-    const htmlContent = parseMarkdown(finalContent);
-    finalContentDiv.innerHTML = htmlContent;
+    // 更新 documentEditor 的内容
+    const documentEditor = document.getElementById('documentEditor');
+    if (documentEditor) {
+        // 将思维过程和最终内容合并保存
+        const combinedContent = `## AI思维过程\n\n${thinkingText}\n\n## 最终内容\n\n${finalContent}`;
+        documentEditor.value = combinedContent;
+        documentEditor.setAttribute('data-original-content', combinedContent.replace(/"/g, '&quot;'));
+    }
     
     // 渲染数学公式
-    if (typeof MathJax !== 'undefined') {
-        MathJax.typesetPromise([finalContentDiv]).catch((e) => console.error('MathJax rendering error:', e));
+    if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
+        // 清除之前的MathJax处理，重新渲染
+        MathJax.typesetClear([documentView]);
+        MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
     }
     
-    // 恢复滚动位置（保持用户的阅读位置）
-    if (currentScrollTop > 0) {
+    // 只在非流式更新时恢复滚动位置
+    if (!isStreaming && currentScrollTop > 0) {
         contentDiv.scrollTop = currentScrollTop;
     }
 }
-
-// ... existing code ...
 
 
