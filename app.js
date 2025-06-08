@@ -18,33 +18,111 @@ let currentLoadedFilename = null; // 用于自动保存当前加载的文件名
 let generatingNodes = new Set(); // 跟踪正在生成文档的节点
 let hasUnsavedChanges = false; // 跟踪知识树是否有未保存的修改
 
-// MathJax优化相关变量
+// KaTeX优化相关变量
 let lastMathContent = '';
-let mathJaxTimer = null;
+let katexTimer = null;
 
-// 优化MathJax渲染 - 只在内容有实质变化时渲染
+// 优化KaTeX渲染 - 只在内容有实质变化时渲染
 const hasNewMath = (content) => {
     const mathPattern = /(\$|\\\(|\\\[)/;
     return mathPattern.test(content) && content !== lastMathContent;
 };
 
+// KaTeX渲染函数
+function renderKaTeX(element) {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(element, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false}
+            ],
+            throwOnError: false,
+            errorColor: '#cc0000',
+            strict: false
+        });
+    }
+}
+
 // 使用防抖渲染
-function scheduleMathJaxRender(content) {
+function scheduleKaTeXRender(content) {
     if (!hasNewMath(content)) return;
     
     lastMathContent = content;
-    clearTimeout(mathJaxTimer);
-    mathJaxTimer = setTimeout(() => {
-        if (typeof MathJax !== 'undefined') {
-            const documentView = document.getElementById('documentView');
-            if (documentView) {
-                MathJax.typesetClear([documentView]);
-                MathJax.typesetPromise([documentView]).catch((e) => 
-                    console.error('MathJax rendering error:', e)
-                );
-            }
+    clearTimeout(katexTimer);
+    katexTimer = setTimeout(() => {
+        const documentView = document.getElementById('documentView');
+        if (documentView) {
+            renderKaTeX(documentView);
         }
-    }, 1000); // 1秒延迟
+        // 同时渲染节点标题
+        renderNodeTitles();
+    }, 300); // 300ms延迟，比MathJax更快
+}
+
+// 简化数学公式显示用于节点标题
+function simplifyMathForNode(text) {
+    // 将常见的LaTeX符号转换为Unicode符号
+    return text
+        .replace(/\$\$([^$]+)\$\$/g, '[$1]') // 块级公式用方括号
+        .replace(/\$([^$]+)\$/g, '$1') // 行内公式去掉美元符号
+        .replace(/\\sum/g, '∑')
+        .replace(/\\int/g, '∫')
+        .replace(/\\infty/g, '∞')
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1/$2')
+        .replace(/\\cdots/g, '⋯')
+        .replace(/\\ldots/g, '…')
+        .replace(/\\alpha/g, 'α')
+        .replace(/\\beta/g, 'β')
+        .replace(/\\gamma/g, 'γ')
+        .replace(/\\delta/g, 'δ')
+        .replace(/\\pi/g, 'π')
+        .replace(/\\theta/g, 'θ')
+        .replace(/\\lambda/g, 'λ')
+        .replace(/\\mu/g, 'μ')
+        .replace(/\\sigma/g, 'σ')
+        .replace(/\\phi/g, 'φ')
+        .replace(/\\omega/g, 'ω')
+        .replace(/\\le/g, '≤')
+        .replace(/\\ge/g, '≥')
+        .replace(/\\ne/g, '≠')
+        .replace(/\\approx/g, '≈')
+        .replace(/\\pm/g, '±')
+        .replace(/\\times/g, '×')
+        .replace(/\\div/g, '÷')
+        .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+        .replace(/\^\{([^}]+)\}/g, '^$1')
+        .replace(/_\{([^}]+)\}/g, '_$1')
+        .replace(/\{([^}]+)\}/g, '$1'); // 移除剩余的大括号
+}
+
+// 渲染节点标题中的数学公式
+function renderNodeTitles() {
+    if (network && network.body && network.body.data && network.body.data.nodes) {
+        const allNodes = network.body.data.nodes.get();
+        const updatedNodes = [];
+        
+        allNodes.forEach(node => {
+            if (node.label && (node.label.includes('$') || node.label.includes('\\(') || node.label.includes('\\['))) {
+                // 简化数学公式显示
+                const simplifiedLabel = simplifyMathForNode(node.label);
+                
+                // 准备更新的节点数据
+                updatedNodes.push({
+                    id: node.id,
+                    label: simplifiedLabel,
+                    title: node.label, // 保留原始公式在tooltip中
+                    font: { multi: false } // 使用纯文本渲染
+                });
+            }
+        });
+        
+        // 批量更新节点
+        if (updatedNodes.length > 0) {
+            network.body.data.nodes.update(updatedNodes);
+        }
+    }
 }
 
 // 简化文档更新逻辑
@@ -113,6 +191,15 @@ function updateDocumentContent(title, thinkingText, finalContent, isStreaming = 
     requestAnimationFrame(() => {
         documentView.innerHTML = '';
         documentView.appendChild(fragment);
+        
+        // 实时渲染数学公式（流式生成时）
+         if (isStreaming) {
+             const hasMath = finalContent.includes('$') || finalContent.includes('\(') || finalContent.includes('\[') ||
+                            (thinkingText && (thinkingText.includes('$') || thinkingText.includes('\(') || thinkingText.includes('\[')));
+             if (hasMath) {
+                 renderKaTeX(documentView);
+             }
+         }
     });
 }
 
@@ -470,15 +557,19 @@ async function createNewNode() {
     
     // 创建节点
     const nodeId = nodeIdCounter++;
+    const simplifiedLabel = simplifyMathForNode(concept);
     const node = {
         id: nodeId,
-        label: concept,
-        title: concept,
+        label: simplifiedLabel,
+        title: concept, // 保留原始公式在tooltip中
         level: selectedNodeId ? nodes.get(selectedNodeId).level + 1 : 0
     };
     
     nodes.add(node);
     hasUnsavedChanges = true; // 标记有未保存的修改
+    
+    // 触发节点标题公式渲染
+    setTimeout(() => renderNodeTitles(), 100);
     
     // 如果有父节点，创建边
     if (selectedNodeId) {
@@ -647,8 +738,18 @@ async function showDocument(nodeId) {
                     
                     if (dataStr === '[DONE]') {
                         // console.log('Received [DONE] signal.');
-                        nodes.update({ id: nodeId, document: finalContent, label: node.label, modelId: modelId });
+                        const simplifiedLabel = simplifyMathForNode(node.label);
+                        nodes.update({ 
+                            id: nodeId, 
+                            document: finalContent, 
+                            label: simplifiedLabel,
+                            title: node.label, // 保留原始公式在tooltip中
+                            modelId: modelId
+                        });
                         hasUnsavedChanges = true; // 标记有未保存的修改
+                        
+                        // 触发节点标题公式渲染
+                        setTimeout(() => renderNodeTitles(), 100);
                         
                         // 显示最终完整内容
                         if (hasStartedReasoning && reasoningContent) {
@@ -704,8 +805,11 @@ async function showDocument(nodeId) {
                                         updateDocumentContent(node.label, '', finalContent, true);
                                     }
                                     
-                                    // 优化的MathJax渲染
-                                    scheduleMathJaxRender(finalContent);
+                                    // 实时KaTeX渲染（流式生成时）
+                                    const documentView = document.getElementById('documentView');
+                                    if (documentView && hasNewMath(finalContent)) {
+                                        renderKaTeX(documentView);
+                                    }
                                 }
                             }
                         } catch (e) {
@@ -734,7 +838,7 @@ async function showDocument(nodeId) {
             }
             
             // 确保最终内容的数学公式正确渲染
-            scheduleMathJaxRender(finalContent);
+            scheduleKaTeXRender(finalContent);
             
             generatingNodes.delete(nodeId); // 移除生成状态
         } catch (error) {
@@ -804,20 +908,13 @@ function displayDocument(title, content, isMarkdown = true, isStreaming = false)
     document.getElementById('sidebar').classList.add('open');
 
     // 渲染数学公式并恢复滚动位置
-    if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-        // 清除之前的MathJax处理，重新渲染
-        MathJax.typesetClear([documentView]);
-        MathJax.typesetPromise([documentView]).then(() => {
-            // 只在非流式更新时恢复滚动位置
-            if (!isStreaming && hadContent && currentScrollTop > 0) {
-                contentDiv.scrollTop = currentScrollTop;
-            }
-        }).catch(e => console.error('MathJax displayDocument error:', e));
-    } else {
-        // 只在非流式更新时恢复滚动位置
-        if (!isStreaming && hadContent && currentScrollTop > 0) {
+    renderKaTeX(documentView);
+    
+    // 只在非流式更新时恢复滚动位置
+    if (!isStreaming && hadContent && currentScrollTop > 0) {
+        setTimeout(() => {
             contentDiv.scrollTop = currentScrollTop;
-        }
+        }, 100); // 给KaTeX渲染一点时间
     }
     
     // 适应网络视图 (如果需要，但与文档滚动无关)
@@ -930,13 +1027,17 @@ function updateNode() {
     const hasDocument = node.document ? true : false;
     
     // 更新节点
+    const simplifiedLabel = simplifyMathForNode(newConcept);
     nodes.update({
         id: selectedNodeId,
-        label: newConcept,
-        title: newConcept,
+        label: simplifiedLabel,
+        title: newConcept, // 保留原始公式在tooltip中
         document: null // 清除旧文档
     });
     hasUnsavedChanges = true; // 标记有未保存的修改
+    
+    // 触发节点标题公式渲染
+    setTimeout(() => renderNodeTitles(), 100);
     
     // 自动保存已移除
     
@@ -1410,12 +1511,9 @@ function actualUpdateThinkingProcess(title, thinkingText, isComplete = false) {
         `;
         
         // 渲染数学公式（只在完成时且包含数学公式时）
-        if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-            const hasMath = thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\[');
-            if (hasMath) {
-                MathJax.typesetClear([documentView]);
-                MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
-            }
+        const hasMath = thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\[');
+        if (hasMath) {
+            renderKaTeX(documentView);
         }
     } else {
         // 思维过程进行中，显示动态内容
@@ -1441,6 +1539,12 @@ function actualUpdateThinkingProcess(title, thinkingText, isComplete = false) {
                 ${htmlContent}<span class="thinking-dots">...</span>
             </div>
         `;
+        
+        // 实时渲染数学公式（流式生成时）
+        const hasMath = thinkingText.includes('$') || thinkingText.includes('\(') || thinkingText.includes('\[');
+        if (hasMath) {
+            renderKaTeX(documentView);
+        }
         
         // 添加思考动画（只添加一次）
         if (!document.querySelector('style[data-thinking-animation]')) {
@@ -1554,14 +1658,10 @@ function displayDocumentWithThinking(title, thinkingText, finalContent, isStream
     }
     
     // 渲染数学公式（只在包含数学公式时）
-    if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-        const hasMath = (thinkingText && (thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\['))) ||
-                       (finalContent && (finalContent.includes('$') || finalContent.includes('\\(') || finalContent.includes('\\[')));
-        if (hasMath) {
-            // 清除之前的MathJax处理，重新渲染
-            MathJax.typesetClear([documentView]);
-            MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
-        }
+    const hasMath = (thinkingText && (thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\['))) ||
+                   (finalContent && (finalContent.includes('$') || finalContent.includes('\\(') || finalContent.includes('\\[')));
+    if (hasMath) {
+        renderKaTeX(documentView);
     }
     
     // 只在非流式更新时恢复滚动位置
