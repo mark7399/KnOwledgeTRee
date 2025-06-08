@@ -18,6 +18,104 @@ let currentLoadedFilename = null; // 用于自动保存当前加载的文件名
 let generatingNodes = new Set(); // 跟踪正在生成文档的节点
 let hasUnsavedChanges = false; // 跟踪知识树是否有未保存的修改
 
+// MathJax优化相关变量
+let lastMathContent = '';
+let mathJaxTimer = null;
+
+// 优化MathJax渲染 - 只在内容有实质变化时渲染
+const hasNewMath = (content) => {
+    const mathPattern = /(\$|\\\(|\\\[)/;
+    return mathPattern.test(content) && content !== lastMathContent;
+};
+
+// 使用防抖渲染
+function scheduleMathJaxRender(content) {
+    if (!hasNewMath(content)) return;
+    
+    lastMathContent = content;
+    clearTimeout(mathJaxTimer);
+    mathJaxTimer = setTimeout(() => {
+        if (typeof MathJax !== 'undefined') {
+            const documentView = document.getElementById('documentView');
+            if (documentView) {
+                MathJax.typesetClear([documentView]);
+                MathJax.typesetPromise([documentView]).catch((e) => 
+                    console.error('MathJax rendering error:', e)
+                );
+            }
+        }
+    }, 1000); // 1秒延迟
+}
+
+// 简化文档更新逻辑
+function updateDocumentContent(title, thinkingText, finalContent, isStreaming = false) {
+    document.getElementById('documentTitle').textContent = title;
+    const documentView = document.getElementById('documentView');
+    if (!documentView) {
+        // 如果documentView不存在，使用原有的显示函数
+        if (thinkingText) {
+            displayDocumentWithThinking(title, thinkingText, finalContent, isStreaming);
+        } else {
+            displayDocument(title, finalContent, true, isStreaming);
+        }
+        return;
+    }
+    
+    // 使用文本节点减少重排
+    const fragment = document.createDocumentFragment();
+    
+    if (thinkingText) {
+        // 有思维过程的情况
+        const thinkingHtml = parseMarkdown(thinkingText);
+        const finalHtml = parseMarkdown(finalContent);
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.innerHTML = `
+            <div class="thinking-section" style="
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                border-left: 4px solid #4CAF50;
+                border: 1px solid #ddd;
+                padding: 15px;
+                border-radius: 8px;
+                font-style: italic;
+                color: #555;
+                line-height: 1.6;
+                font-size: 13px;
+                margin-bottom: 20px;
+            ">
+                <div style="
+                    color: #4CAF50;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                    font-size: 14px;
+                ">🧠 AI思维过程</div>
+                ${thinkingHtml}
+            </div>
+            <div class="final-content" style="
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                line-height: 1.6;
+            ">
+                ${finalHtml}
+            </div>
+        `;
+        fragment.appendChild(contentDiv);
+    } else {
+        // 只有最终内容的情况
+        const contentDiv = document.createElement('div');
+        contentDiv.innerHTML = parseMarkdown(finalContent);
+        fragment.appendChild(contentDiv);
+    }
+    
+    // 使用requestAnimationFrame优化
+    requestAnimationFrame(() => {
+        documentView.innerHTML = '';
+        documentView.appendChild(fragment);
+    });
+}
+
 // 新建知识树
 function newTree() {
     // 检查是否有未保存的更改（只有当前没有保存的文件名时才提示保存）
@@ -73,13 +171,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     updateModelSelector();
 });
 
-async function autoSaveTree() {
-    if (currentLoadedFilename) {
-        console.log(`Autosaving tree: ${currentLoadedFilename}`);
-        // 第二个参数 true 表示是自动保存，避免显示对话框和不必要的提示
-        await confirmSaveTree(currentLoadedFilename, true); 
-    }
-}
+// 自动保存功能已移除
 
 
 // 初始化网络图
@@ -397,7 +489,7 @@ async function createNewNode() {
     }
     
     // 不再自动生成文档和子节点
-    autoSaveTree();
+    // 自动保存已移除
 }
 
 // 配置marked选项
@@ -515,47 +607,45 @@ async function showDocument(nodeId) {
     contentDiv.innerHTML = ''; // 清空所有内容，为新的思维链和文档做准备 
 
     try {
-        const modelId = document.getElementById('modelSelect').value;
-        // 获取节点链历史信息
-        const nodeChain = getNodeChain(nodeId);
-        
-        const response = await fetch(`http://localhost:${serverPort}/api/generate-document`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                concept: node.label,
-                modelId: modelId,
-                promptId: selectedPromptId,
-                nodeChain: nodeChain
-            })
-        });
-
-        if (!response.ok) {
-            return; // 静默处理请求失败
-        }
-
-        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-        
-        // 显示思维过程
-        let reasoningContent = '';
-        let finalContent = '';
-        let hasStartedReasoning = false;
-        let hasStartedContent = false;
-        
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
+            const modelId = document.getElementById('modelSelect').value;
+            // 获取节点链历史信息
+            const nodeChain = getNodeChain(nodeId);
             
-            const { value, done } = await reader.read();
-            if (done) {
-                // console.log('Stream finished.');
-                break;
+            const response = await fetch(`http://localhost:${serverPort}/api/generate-document`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    concept: node.label,
+                    modelId: modelId,
+                    promptId: selectedPromptId,
+                    nodeChain: nodeChain
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
-            const lines = value.split('\n\n');
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const jsonData = line.substring(5).trim();
-                    if (jsonData === '[DONE]') {
+            const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+            
+            // 显示思维过程
+            let reasoningContent = '';
+            let finalContent = '';
+            let hasStartedReasoning = false;
+            let hasStartedContent = false;
+            
+            // 修改流处理部分 - 使用更可靠的分隔符处理
+            const processChunk = (chunk) => {
+                // 使用更可靠的分隔符处理
+                const events = chunk.split(/(?=data: )/);
+                
+                events.forEach(event => {
+                    if (!event.trim()) return;
+                    
+                    // 确保以"data: "开头
+                    const dataStr = event.startsWith('data: ') ? event.substring(6) : event;
+                    
+                    if (dataStr === '[DONE]') {
                         // console.log('Received [DONE] signal.');
                         nodes.update({ id: nodeId, document: finalContent, label: node.label, modelId: modelId });
                         hasUnsavedChanges = true; // 标记有未保存的修改
@@ -569,92 +659,92 @@ async function showDocument(nodeId) {
                         }
                         
                         generatingNodes.delete(nodeId); // 移除生成状态
-                        autoSaveTree(); 
+                        // 自动保存已移除 
                         return; 
-                    }
-                    if (jsonData === '[ERROR]') {
-                        // 收到错误信号，停止处理
+                    } else if (dataStr === '[ERROR]') {
+                        // 处理错误
                         console.warn('Received error signal from server');
-                        generatingNodes.delete(nodeId);
-                        document.getElementById('documentTitle').textContent = node.label + ' - 生成失败';
-                        return;
-                    }
-                    try {
-                        const parsed = JSON.parse(jsonData);
-                        
-                        // 处理思维过程内容
-                        if (parsed.reasoning_content) {
-                            reasoningContent += parsed.reasoning_content;
+                        throw new Error('Server returned error signal');
+                    } else {
+                        try {
+                            const parsed = JSON.parse(dataStr);
                             
-                            if (!hasStartedReasoning) {
-                                hasStartedReasoning = true;
-                            }
-                            // 更新思维过程显示
-                            displayThinkingProcess(node.label, reasoningContent, false);
-                        }
-                        
-                        // 处理最终内容
-                        if (parsed.content) {
-                            finalContent += parsed.content;
+                            // 处理数据 - 保持原有的处理逻辑
                             
-                            if (!hasStartedContent) {
-                                hasStartedContent = true;
-                                // 思维过程完成，开始显示最终内容
-                                if (hasStartedReasoning && reasoningContent) {
-                                    displayThinkingProcess(node.label, reasoningContent, true);
-                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent, true);
-                                } else {
-                                    // 没有思维过程，直接显示文档
-                                    displayDocument(node.label, finalContent, true, true);
-                                }
-                            } else {
-                                // 更新最终内容时，添加实时数学公式渲染
-                                if (hasStartedReasoning && reasoningContent) {
-                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent, true);
-                                } else {
-                                    displayDocument(node.label, finalContent, true, true);
-                                }
+                            // 处理思维过程内容
+                            if (parsed.reasoning_content) {
+                                reasoningContent += parsed.reasoning_content;
                                 
-                                // 实时数学公式渲染
-                                if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-                                    const documentView = document.getElementById('documentView');
-                                    if (documentView) {
-                                        MathJax.typesetClear([documentView]);
-                                        MathJax.typesetPromise([documentView]).catch((e) => 
-                                            console.error('MathJax real-time rendering error:', e)
-                                        );
+                                if (!hasStartedReasoning) {
+                                    hasStartedReasoning = true;
+                                }
+                                // 更新思维过程显示
+                                displayThinkingProcess(node.label, reasoningContent, false);
+                            }
+                            
+                            // 处理最终内容
+                            if (parsed.content) {
+                                finalContent += parsed.content;
+                                
+                                if (!hasStartedContent) {
+                                    hasStartedContent = true;
+                                    // 思维过程完成，开始显示最终内容
+                                    if (hasStartedReasoning && reasoningContent) {
+                                        displayThinkingProcess(node.label, reasoningContent, true);
+                                        updateDocumentContent(node.label, reasoningContent, finalContent, true);
+                                    } else {
+                                        // 没有思维过程，直接显示文档
+                                        updateDocumentContent(node.label, '', finalContent, true);
                                     }
+                                } else {
+                                    // 更新最终内容时，使用优化的更新函数
+                                    if (hasStartedReasoning && reasoningContent) {
+                                        updateDocumentContent(node.label, reasoningContent, finalContent, true);
+                                    } else {
+                                        updateDocumentContent(node.label, '', finalContent, true);
+                                    }
+                                    
+                                    // 优化的MathJax渲染
+                                    scheduleMathJaxRender(finalContent);
                                 }
                             }
+                        } catch (e) {
+                            // 解析JSON失败
+                            console.warn('解析JSON失败', dataStr);
                         }
-                    } catch (e) {
-                        // 如果是JSON解析错误，记录但继续处理
-                        if (jsonData.trim() && !jsonData.includes('[DONE]') && !jsonData.includes('[ERROR]')) {
-                            console.warn('Skipping invalid JSON chunk:', jsonData.substring(0, 50));
-                        }
-                        continue; // 跳过这个无效的数据块，继续处理下一个
-                    }
-                }
+                     }
+                 });
+             };
+             
+             // 主循环
+             while (true) {
+                 const { value, done } = await reader.read();
+                 if (done) break;
+                 
+                 processChunk(value);
+             }
+            // 如果循环正常结束但没有收到 [DONE]，也进行最终处理
+            
+            // 显示最终完整内容
+            if (hasStartedReasoning && reasoningContent) {
+                displayThinkingProcess(node.label, reasoningContent, true);
+                updateDocumentContent(node.label, reasoningContent, finalContent);
+            } else {
+                updateDocumentContent(node.label, '', finalContent);
             }
+            
+            // 确保最终内容的数学公式正确渲染
+            scheduleMathJaxRender(finalContent);
+            
+            generatingNodes.delete(nodeId); // 移除生成状态
+        } catch (error) {
+            console.error('Generation failed:', error);
+            generatingNodes.delete(nodeId);
+            document.getElementById('documentTitle').textContent = node.label + ' - 生成失败';
+            return;
         }
-        // 如果循环正常结束但没有收到 [DONE]，也进行最终处理
-        nodes.update({ id: nodeId, document: finalContent, label: node.label, modelId: modelId });
-        hasUnsavedChanges = true; // 标记有未保存的修改
-        
-        // 显示最终完整内容
-        if (hasStartedReasoning && reasoningContent) {
-            displayThinkingProcess(node.label, reasoningContent, true);
-            displayDocumentWithThinking(node.label, reasoningContent, finalContent);
-        } else {
-            displayDocument(node.label, finalContent);
-        }
-        
-        generatingNodes.delete(nodeId); // 移除生成状态
-        autoSaveTree();
-
-    } finally {
-        generatingNodes.delete(nodeId); // 移除生成状态
-    }
+    
+    generatingNodes.delete(nodeId); // 移除生成状态
 }
 
 // 显示文档内容
@@ -780,7 +870,7 @@ function saveDocumentChanges() {
             displayDocument(node.label, newContent);
             
             // 自动保存
-            autoSaveTree();
+            // 自动保存已移除
             
             alert('文档已更新');
         }
@@ -848,7 +938,7 @@ function updateNode() {
     });
     hasUnsavedChanges = true; // 标记有未保存的修改
     
-    autoSaveTree();
+    // 自动保存已移除
     
     // 如果节点之前有文档，询问是否重新生成
     if (hasDocument && oldConcept !== newConcept) {
@@ -883,7 +973,7 @@ function deleteNode() {
     deleteNodeRecursive(selectedNodeId);
     hasUnsavedChanges = true; // 标记有未保存的修改
     closeSidebar();
-    autoSaveTree();
+    // 自动保存已移除
 }
 
 // 从选中文本创建节点
@@ -1068,7 +1158,7 @@ async function saveTree() {
     // 如果当前有加载的文件，询问是否覆盖
     if (currentLoadedFilename) {
         if (confirm(`是否覆盖当前加载的知识树 "${currentLoadedFilename}"？`)) {
-            await confirmSaveTree(currentLoadedFilename, false);
+            await confirmSaveTree(currentLoadedFilename);
             return;
         }
     }
@@ -1083,15 +1173,13 @@ async function saveTree() {
     }
 }
 
-async function confirmSaveTree(filenameFromDialog, isAutoSave = false) {
-    const filename = isAutoSave ? filenameFromDialog : (filenameFromDialog || document.getElementById('filenameInput').value);
-    if (!isAutoSave && !filename) {
+async function confirmSaveTree(filenameFromDialog) {
+    const filename = filenameFromDialog || document.getElementById('filenameInput').value;
+    if (!filename) {
         alert('文件名不能为空');
         return;
     }
-    if (!isAutoSave) {
-        closeDialog('filenameDialog');
-    }
+    closeDialog('filenameDialog');
     
     const treeData = {
         nodes: nodes.get(),
@@ -1099,9 +1187,7 @@ async function confirmSaveTree(filenameFromDialog, isAutoSave = false) {
         nodeIdCounter: nodeIdCounter
     };
     
-    if (!isAutoSave) {
-        showLoading();
-    }
+    showLoading();
     try {
         const pureFilename = filename.includes('/') ? filename.substring(filename.lastIndexOf('/') + 1) : filename;
         const response = await fetch(`http://localhost:${serverPort}/api/save-tree`, {
@@ -1117,19 +1203,12 @@ async function confirmSaveTree(filenameFromDialog, isAutoSave = false) {
             // 更新当前加载的文件名
             currentLoadedFilename = pureFilename;
             hasUnsavedChanges = false; // 重置修改状态
-            
-            if (!isAutoSave) {
-                alert('保存成功');
-            } else {
-                console.log(`Tree ${pureFilename} autosaved successfully.`);
-            }
+            alert('保存成功');
         }
     } catch (error) {
-        // 静默处理保存失败
+        alert('保存失败');
     }
-    if (!isAutoSave) {
-        hideLoading();
-    }
+    hideLoading();
 }
 
 // 关闭对话框
@@ -1330,10 +1409,13 @@ function actualUpdateThinkingProcess(title, thinkingText, isComplete = false) {
             </div>
         `;
         
-        // 渲染数学公式（只在完成时）
+        // 渲染数学公式（只在完成时且包含数学公式时）
         if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-            MathJax.typesetClear([documentView]);
-            MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
+            const hasMath = thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\[');
+            if (hasMath) {
+                MathJax.typesetClear([documentView]);
+                MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
+            }
         }
     } else {
         // 思维过程进行中，显示动态内容
@@ -1471,11 +1553,15 @@ function displayDocumentWithThinking(title, thinkingText, finalContent, isStream
         documentEditor.setAttribute('data-original-content', combinedContent.replace(/"/g, '&quot;'));
     }
     
-    // 渲染数学公式
+    // 渲染数学公式（只在包含数学公式时）
     if (typeof MathJax !== 'undefined' && typeof MathJax.typesetPromise === 'function') {
-        // 清除之前的MathJax处理，重新渲染
-        MathJax.typesetClear([documentView]);
-        MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
+        const hasMath = (thinkingText && (thinkingText.includes('$') || thinkingText.includes('\\(') || thinkingText.includes('\\['))) ||
+                       (finalContent && (finalContent.includes('$') || finalContent.includes('\\(') || finalContent.includes('\\[')));
+        if (hasMath) {
+            // 清除之前的MathJax处理，重新渲染
+            MathJax.typesetClear([documentView]);
+            MathJax.typesetPromise([documentView]).catch((e) => console.error('MathJax rendering error:', e));
+        }
     }
     
     // 只在非流式更新时恢复滚动位置

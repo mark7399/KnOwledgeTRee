@@ -17,13 +17,13 @@ let apiConfigs = {
   models: {
     'deepseek-reasoner': {
       name: 'DeepSeek R1 (推理模型)',
-      url: 'https://api.deepseek.com/v1/chat/completions',
+      url: 'https://api.deepseek.com/chat/completions',
       key: '',
       model: 'deepseek-reasoner'
     },
     'deepseek-chat': {
       name: 'DeepSeek V3 (对话模型)',
-      url: 'https://api.deepseek.com/v1/chat/completions',
+      url: 'https://api.deepseek.com/chat/completions',
       key: '',
       model: 'deepseek-chat'
     }
@@ -58,7 +58,7 @@ async function loadConfig() {
       // 迁移旧的deepseek配置到新的deepseek-reasoner
       apiConfigs.models['deepseek-reasoner'] = {
         name: 'DeepSeek R1 (推理模型)',
-        url: 'https://api.deepseek.com/v1/chat/completions',
+        url: 'https://api.deepseek.com/chat/completions',
         model: 'deepseek-reasoner',
         ...config.apiConfigs.deepseek
       };
@@ -178,7 +178,7 @@ app.post('/api/generate-document', async (req, res) => {
       // 最大输出4K tokens（默认），最大8K tokens
       requestBody.max_tokens = 8192;
       // 为学习数学和编程设置合适的参数
-      requestBody.temperature = 0.6; // 适合一般对话和解释概念
+      requestBody.temperature = 0.0; 
       requestBody.top_p = 0.9;
       requestBody.presence_penalty = 0;
       requestBody.frequency_penalty = 0;
@@ -202,60 +202,95 @@ app.post('/api/generate-document', async (req, res) => {
     
 
 
-    streamResponse.data.on('data', (chunk) => {
-      // DeepSeek API 返回的流数据格式通常是 JSON lines (ndjson)
-      const chunkStr = chunk.toString();
+    // 新增：流处理状态跟踪
+    let isFinished = false;
+    let buffer = '';
+    
+    // 添加超时处理
+    const timeout = setTimeout(() => {
+      if (!isFinished) {
+        console.error('流响应超时');
+        res.write('data: [TIMEOUT]\n\n');
+        res.end();
+        isFinished = true;
+      }
+    }, 300000); // 5分钟超时
+
+    // 改进的流数据处理
+    const processData = (data) => {
+      buffer += data.toString();
       
-      try {
-        // 按行分割处理
-        const lines = chunkStr.split('\n').filter(line => line.trim() !== '');
-        for (const line of lines) {
-          // 处理 DeepSeek API 的 SSE keep-alive 注释
-          if (line.trim().startsWith(': keep-alive') || line.trim().startsWith(':')) {
-            continue;
+      while (true) {
+        const match = buffer.match(/(.*?)(\r?\n)/);
+        if (!match) break;
+        
+        const line = match[1];
+        buffer = buffer.substring(match[0].length);
+        
+        if (line.trim() === '') continue;
+        if (line.startsWith(':') || line.includes('keep-alive')) continue;
+        
+        if (line.startsWith('data: ')) {
+          const jsonData = line.substring(5).trim();
+          
+          if (jsonData === '[DONE]') {
+            res.write('data: [DONE]\n\n');
+            res.end();
+            isFinished = true;
+            clearTimeout(timeout);
+            return;
           }
           
-          if (line.startsWith('data: ')) {
-            const jsonData = line.substring(5).trim();
-            if (jsonData === '[DONE]') {
-              res.write('data: [DONE]\n\n');
-              res.end();
-              return;
-            }
-            
-            try {
-              const parsed = JSON.parse(jsonData);
-              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
-                const delta = parsed.choices[0].delta;
-                
-                // 处理思维过程内容 - 直接发送完整块
-                if (delta.reasoning_content) {
-                  res.write(`data: ${JSON.stringify({ reasoning_content: delta.reasoning_content })}\n\n`);
-                  if (res.flush) res.flush();
-                }
-                
-                // 处理最终内容 - 直接发送完整块
-                if (delta.content) {
-                  res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`);
-                  if (res.flush) res.flush();
-                }
+          try {
+            const parsed = JSON.parse(jsonData);
+            if (parsed.choices?.[0]?.delta) {
+              const delta = parsed.choices[0].delta;
+              
+              // 统一处理内容字段
+              if (delta.content) {
+                res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`);
+                if (res.flush) res.flush();
               }
-            } catch (jsonParseError) {
-              // 忽略无法解析的行
-              continue;
+              // 处理DeepSeek特有的推理内容
+              else if (delta.reasoning_content) {
+                res.write(`data: ${JSON.stringify({ reasoning_content: delta.reasoning_content })}\n\n`);
+                if (res.flush) res.flush();
+              }
             }
+          } catch (error) {
+            console.error('JSON解析错误:', error.message, '原始数据:', jsonData);
           }
         }
-      } catch (e) {
-        // 处理块解析错误
-        console.error('Error processing chunk:', e.message);
+      }
+    };
+
+    streamResponse.data.on('data', (chunk) => {
+      if (!isFinished) {
+        processData(chunk);
       }
     });
 
     streamResponse.data.on('end', () => {
-      // console.log('Stream ended from API.');
-      res.write('data: [DONE]\n\n'); // 确保在流结束后发送完成信号
-      res.end();
+      if (!isFinished) {
+        // 处理剩余缓冲区数据
+        if (buffer.trim() !== '') {
+          processData('');
+        }
+        res.write('data: [DONE]\n\n');
+        res.end();
+        isFinished = true;
+        clearTimeout(timeout);
+      }
+    });
+
+    streamResponse.data.on('error', (err) => {
+      if (!isFinished) {
+        console.error('流错误:', err);
+        res.write('data: [ERROR]\n\n');
+        res.end();
+        isFinished = true;
+        clearTimeout(timeout);
+      }
     });
 
 
@@ -370,11 +405,5 @@ async function startServer() {
     });
   });
 }
-
-// 主服务器启动
-// app.listen(PORT, () => {
-//     console.log(`Server is running on http://localhost:${PORT}`);
-// });
-// 现在由 startServer 启动
 
 module.exports = { startServer };

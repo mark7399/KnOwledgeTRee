@@ -3,7 +3,8 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
+# 忽略 saved_trees 文件夹及其所有内容
+saved_trees/
 # Runtime data
 pids
 *.pid
