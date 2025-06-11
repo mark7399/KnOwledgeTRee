@@ -63,21 +63,20 @@ function scheduleKaTeXRender(content) {
 
 // 简化数学公式显示用于节点标题
 function simplifyMathForNode(text) {
-    // 将常见的LaTeX符号转换为Unicode符号
+    // 如果文本包含复杂的LaTeX公式，保留原始格式
+    if (text.includes('\\frac') || text.includes('\\sum') || text.includes('\\int') || 
+        text.includes('_{') || text.includes('^{') || text.includes('\\')) {
+        return text; // 保留原始LaTeX格式
+    }
+    
+    // 只对简单的符号进行转换
     return text
-        .replace(/\$\$([^$]+)\$\$/g, '[$1]') // 块级公式用方括号
-        .replace(/\$([^$]+)\$/g, '$1') // 行内公式去掉美元符号
-        .replace(/\\sum/g, '∑')
-        .replace(/\\int/g, '∫')
         .replace(/\\infty/g, '∞')
-        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1/$2')
-        .replace(/\\cdots/g, '⋯')
-        .replace(/\\ldots/g, '…')
+        .replace(/\\pi/g, 'π')
         .replace(/\\alpha/g, 'α')
         .replace(/\\beta/g, 'β')
         .replace(/\\gamma/g, 'γ')
         .replace(/\\delta/g, 'δ')
-        .replace(/\\pi/g, 'π')
         .replace(/\\theta/g, 'θ')
         .replace(/\\lambda/g, 'λ')
         .replace(/\\mu/g, 'μ')
@@ -90,11 +89,7 @@ function simplifyMathForNode(text) {
         .replace(/\\approx/g, '≈')
         .replace(/\\pm/g, '±')
         .replace(/\\times/g, '×')
-        .replace(/\\div/g, '÷')
-        .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
-        .replace(/\^\{([^}]+)\}/g, '^$1')
-        .replace(/_\{([^}]+)\}/g, '_$1')
-        .replace(/\{([^}]+)\}/g, '$1'); // 移除剩余的大括号
+        .replace(/\\div/g, '÷');
 }
 
 // 渲染节点标题中的数学公式
@@ -105,15 +100,15 @@ function renderNodeTitles() {
         
         allNodes.forEach(node => {
             if (node.label && (node.label.includes('$') || node.label.includes('\\(') || node.label.includes('\\['))) {
-                // 简化数学公式显示
-                const simplifiedLabel = simplifyMathForNode(node.label);
+                // 对于包含数学公式的节点，使用HTML渲染
+                const processedLabel = node.label;
                 
                 // 准备更新的节点数据
                 updatedNodes.push({
                     id: node.id,
-                    label: simplifiedLabel,
+                    label: processedLabel,
                     title: node.label, // 保留原始公式在tooltip中
-                    font: { multi: false } // 使用纯文本渲染
+                    font: { multi: 'html' } // 使用HTML渲染以支持数学公式
                 });
             }
         });
@@ -121,6 +116,23 @@ function renderNodeTitles() {
         // 批量更新节点
         if (updatedNodes.length > 0) {
             network.body.data.nodes.update(updatedNodes);
+            
+            // 延迟渲染数学公式
+            setTimeout(() => {
+                const nodeElements = document.querySelectorAll('.vis-network canvas');
+                if (nodeElements.length > 0 && typeof renderMathInElement !== 'undefined') {
+                    nodeElements.forEach(element => {
+                        renderMathInElement(element, {
+                            delimiters: [
+                                {left: '$$', right: '$$', display: true},
+                                {left: '$', right: '$', display: false},
+                                {left: '\\(', right: '\\)', display: false},
+                                {left: '\\[', right: '\\]', display: true}
+                            ]
+                        });
+                    });
+                }
+            }, 100);
         }
     }
 }
@@ -351,11 +363,21 @@ function initializeNetwork() {
                 return;
             }
             
-            // 如果节点已有文档且模型未更改，直接显示文档
-            if (node && node.document && node.modelId === currentModel) {
+            // 添加调试信息
+            console.log('节点点击调试信息:', {
+                nodeId: nodeId,
+                node: node,
+                hasDocument: node && node.document ? true : false,
+                documentLength: node && node.document ? node.document.length : 0
+            });
+            
+            // 如果节点已有文档，直接显示文档（不再检查模型是否更改）
+            if (node && node.document) {
+                console.log('显示已有文档，文档长度:', node.document.length);
                 displayDocument(node.label, node.document);
             } else {
-                // 否则显示提示词选择对话框（新节点、模型已更改、或更新后的节点）
+                console.log('节点无文档，显示提示词选择对话框');
+                // 否则显示提示词选择对话框（仅针对没有文档的新节点）
                 showPromptSelectDialog(nodeId);
             }
         }
@@ -746,6 +768,13 @@ async function showDocument(nodeId) {
                             title: node.label, // 保留原始公式在tooltip中
                             modelId: modelId
                         });
+                        
+                        // 添加调试信息
+                        console.log('文档生成完成，保存到节点:', {
+                            nodeId: nodeId,
+                            documentLength: finalContent.length,
+                            nodeAfterUpdate: nodes.get(nodeId)
+                        });
                         hasUnsavedChanges = true; // 标记有未保存的修改
                         
                         // 触发节点标题公式渲染
@@ -813,8 +842,42 @@ async function showDocument(nodeId) {
                                 }
                             }
                         } catch (e) {
-                            // 解析JSON失败
-                            console.warn('解析JSON失败', dataStr);
+                            // 解析JSON失败，但仍需检查是否为特殊信号
+                            if (dataStr.trim() === '[DONE]') {
+                                // 处理[DONE]信号
+                                const simplifiedLabel = simplifyMathForNode(node.label);
+                                nodes.update({ 
+                                    id: nodeId, 
+                                    document: finalContent, 
+                                    label: simplifiedLabel,
+                                    title: node.label, // 保留原始公式在tooltip中
+                                    modelId: modelId
+                                });
+                                
+                                // 添加调试信息
+                                console.log('文档生成完成，保存到节点:', {
+                                    nodeId: nodeId,
+                                    documentLength: finalContent.length,
+                                    nodeAfterUpdate: nodes.get(nodeId)
+                                });
+                                hasUnsavedChanges = true; // 标记有未保存的修改
+                                
+                                // 触发节点标题公式渲染
+                                setTimeout(() => renderNodeTitles(), 100);
+                                
+                                // 显示最终完整内容
+                                if (hasStartedReasoning && reasoningContent) {
+                                    displayThinkingProcess(node.label, reasoningContent, true);
+                                    displayDocumentWithThinking(node.label, reasoningContent, finalContent);
+                                } else {
+                                    displayDocument(node.label, finalContent);
+                                }
+                                
+                                generatingNodes.delete(nodeId); // 移除生成状态
+                                return;
+                            } else {
+                                console.warn('解析JSON失败', dataStr, e);
+                            }
                         }
                      }
                  });

@@ -143,10 +143,16 @@ app.post('/api/generate-document', async (req, res) => {
           role: 'user',
           content: promptTemplate.template.replace(/{concept}/g, node.concept)
         });
-        // 添加助手回复（文档内容）
+        // 添加助手回复（文档内容，过滤掉思维链部分）
+        let cleanDocument = node.document;
+        // 移除思维过程部分，只保留最终内容
+        const thinkingRegex = /🧠 AI思维过程[\s\S]*?(?=\n\n|$)/g;
+        const thinkingRegex2 = /🤔 AI正在思考[\s\S]*?(?=\n\n|$)/g;
+        cleanDocument = cleanDocument.replace(thinkingRegex, '').replace(thinkingRegex2, '').trim();
+        
         messages.push({
           role: 'assistant',
-          content: node.document
+          content: cleanDocument
         });
       }
     });
@@ -171,7 +177,7 @@ app.post('/api/generate-document', async (req, res) => {
     if (model.model === 'deepseek-reasoner') {
       // deepseek-reasoner 参数设置
       // 最大输出32K tokens（默认），最大64K tokens
-      requestBody.max_tokens = 32768; // 使用较大的token数以支持长文档生成
+      requestBody.max_tokens = 64000; // 使用较大的token数以支持长文档生成
       // 注意：deepseek-reasoner 不支持 temperature, top_p, presence_penalty, frequency_penalty
     } else if (model.model === 'deepseek-chat') {
       // deepseek-chat 参数设置
